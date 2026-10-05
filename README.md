@@ -7,7 +7,7 @@ Prototipo interactivo (React + TypeScript) con dos modos:
 
 ## Uso rápido
 
-Abra `SONIDO.html` en cualquier navegador (archivo único, ya compilado).
+Abra `index.html` en cualquier navegador (archivo único, ya compilado). En línea: https://maxigitpv.github.io/SONIDO/
 
 ## Desarrollo
 
@@ -17,4 +17,4 @@ npx tsc -p .        # revisa tipos
 node build.mjs      # genera dist.html (página lista para publicar)
 ```
 
-`build.mjs` genera `dist.html`. Para el archivo autónomo, envuelva su contenido en `<!doctype html><html><body>…</body></html>`.
+`build.mjs` genera `dist.html`; `index.html` es esa misma página envuelta en `<!doctype html><html><body>…</body></html>`.
