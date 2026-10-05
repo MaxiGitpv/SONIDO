@@ -1,0 +1,5 @@
+node_modules/
+*.png
+preview*.html
+pv-*.html
+dist.html
