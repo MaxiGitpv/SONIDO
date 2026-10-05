@@ -1,8 +1,9 @@
 import { useRef } from 'react';
 import { useLive, Icon } from './ctx';
-import { CH_META } from './data';
-import { CH_IDS } from './types';
-import type { ChId } from './types';
+import { CH_META, chIcon, chName } from './data';
+import { CH_IDS, INST_IDS, IN_IDS, isInput } from './types';
+import type { ChId, StripGroup } from './types';
+import { Expand } from './nav';
 import { Fader } from '../components/Fader';
 import { Knob } from '../components/Knob';
 import { fmtDb } from '../util';
@@ -14,6 +15,7 @@ function Source({ id }: { id: ChId }) {
   const input = useRef<HTMLInputElement>(null);
   const name = s.files[id];
   if (id === 'click') return <div className={`ls-badge${s.clickMonitor ? ' live' : ''}`}><Icon name="headphones" size={12} />Monitor</div>;
+  if (isInput(id)) return <div className={`ls-badge${s.inputs[id].device ? ' live' : ''}`}>{s.inputs[id].device ? 'Entrada activa' : 'Sin entrada'}</div>;
   if (id !== 'pad' && id !== 'drums' && id !== 'tracks') return <div className="ls-badge">{CH_META[id].badge}</div>;
   const pick = (
     <input ref={input} type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadFile(id, f); e.target.value = ''; }} />
@@ -38,12 +40,12 @@ function Source({ id }: { id: ChId }) {
 function Strip({ id }: { id: ChId }) {
   const { s, d, mix } = useLive();
   const c = mix.chans[id];
-  const meta = CH_META[id];
+  const meta = { ...CH_META[id], name: chName(s, id) };
   const sel = s.selected === id;
   return (
     <div className={`lstrip${sel ? ' sel' : ''}${c.mute ? ' muted' : ''}`} style={{ ['--cc' as string]: meta.color }}>
       <button className="ls-head" onClick={() => d({ type: 'select', id })} onDoubleClick={() => d({ type: 'editor', id })} aria-pressed={sel} title="Seleccionar canal. Doble toque: abrir el editor">
-        <Icon name={id} size={15} />
+        <Icon name={chIcon(id)} size={15} />
         <span>{meta.name}</span>
       </button>
       <div className="ls-pan">
@@ -88,13 +90,29 @@ export function MasterStrip() {
   );
 }
 
+const GROUPS: { id: StripGroup; label: string; ids: ChId[] }[] = [
+  { id: 'all', label: 'Todos', ids: CH_IDS },
+  { id: 'inst', label: 'Instrumentos', ids: INST_IDS },
+  { id: 'inputs', label: 'Micrófonos y entradas', ids: IN_IDS },
+  { id: 'tracks', label: 'Pistas', ids: ['tracks', 'click'] },
+];
+
 export function StripRow({ tall }: { tall?: boolean }) {
-  const { mix, d } = useLive();
+  const { s, mix, d } = useLive();
   const anySolo = Object.values(mix.chans).some((c) => c.solo);
+  const ids = GROUPS.find((g) => g.id === s.stripGroup)?.ids ?? CH_IDS;
   return (
     <div className={`stripscroll${tall ? ' tall' : ''}`}>
+      <div className="stripbar">
+        <div className="segx sm" role="tablist" aria-label="Grupo de canales">
+          {GROUPS.map((g) => (
+            <button key={g.id} role="tab" aria-selected={s.stripGroup === g.id} className={s.stripGroup === g.id ? 'on' : ''} onClick={() => d({ type: 'group', group: g.id })}>{g.label}</button>
+          ))}
+        </div>
+        {!tall && <Expand tab="mixer" label="Mezcla" />}
+      </div>
       <div className="striprow">
-        {CH_IDS.map((id) => <Strip key={id} id={id} />)}
+        {ids.map((id) => <Strip key={id} id={id} />)}
         <i className="sep" aria-hidden="true" />
         <MasterStrip />
       </div>

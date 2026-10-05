@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLive, Icon, Art } from './ctx';
-import { CH_META, KEY_NAMES, EQ_NAMES, isBlack, layerInfo, noteName } from './data';
+import { CH_META, KEY_NAMES, EQ_NAMES, chName, isBlack, layerInfo, noteName } from './data';
 import { PLAYABLE, SCENES, STYLES } from './types';
 import type { Chan, ChId, Style, Zone } from './types';
 import { engine } from './engine';
 import { chanResponse, LIVE_KINDS } from './eqmath';
 import { PadsGrid } from './PadsGrid';
 import { Timeline } from './Timeline';
+import { Expand } from './nav';
 import { Knob } from '../components/Knob';
 import { HSlider } from '../components/HSlider';
 import { compOut } from '../dsp';
@@ -204,6 +205,7 @@ export function PlayPanel({ held, onDown, onUp }: { held: number[]; onDown: (n: 
           <button role="tab" aria-selected={s.playPanel === 'keys'} className={s.playPanel === 'keys' ? 'on' : ''} onClick={() => d({ type: 'playPanel', panel: 'keys' })}><Icon name="keys" size={14} /> Teclado</button>
           <button role="tab" aria-selected={s.playPanel === 'pads'} className={s.playPanel === 'pads' ? 'on' : ''} onClick={() => d({ type: 'playPanel', panel: 'pads' })}><Icon name="grid" size={14} /> Cuadros</button>
         </div>
+        <Expand tab="play" label="Tocar en vivo" />
       </header>
       <SoundLayers />
       {s.playPanel === 'keys' ? <LiveKeyboard held={held} onDown={onDown} onUp={onUp} /> : <PadsGrid />}
@@ -412,7 +414,7 @@ export function ChannelFx() {
       <div className="cfx-tabs" role="tablist">
         {tabs.map(([t, l]) => (
           <button key={t} role="tab" aria-selected={s.eqTab === t} className={s.eqTab === t ? 'on' : ''} onClick={() => d({ type: 'eqTab', tab: t })}>
-            {l}{t === 'eq' && <> · <span style={{ color: CH_META[id].color }}>{CH_META[id].name}</span></>}
+            {l}{t === 'eq' && <> · <span style={{ color: CH_META[id].color }}>{chName(s, id)}</span></>}
           </button>
         ))}
         <button className="cfx-open" onClick={() => d({ type: 'editor', id })} title="Abrir el editor completo de este canal">
@@ -435,7 +437,7 @@ export function ChannelFx() {
       {(s.eqTab === 'reverb' || s.eqTab === 'delay') && (
         <div className="cfx-body sendsx">
           <div className="sendrow">
-            <span>Envío de <b style={{ color: CH_META[id].color }}>{CH_META[id].name}</b> a {s.eqTab === 'reverb' ? 'Hall Reverb' : 'Delay 1/4'}</span>
+            <span>Envío de <b style={{ color: CH_META[id].color }}>{chName(s, id)}</b> a {s.eqTab === 'reverb' ? 'Hall Reverb' : 'Delay 1/4'}</span>
             {dbSlider('Nivel de envío', s.eqTab === 'reverb' ? ch.sendRev : ch.sendDly, (v) => d({ type: 'ch', id, fn: (c) => (s.eqTab === 'reverb' ? { ...c, sendRev: v } : { ...c, sendDly: v }) }))}
             <b className="mono">{fmtDb(s.eqTab === 'reverb' ? ch.sendRev : ch.sendDly)} dB</b>
           </div>

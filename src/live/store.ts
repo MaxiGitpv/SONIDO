@@ -1,6 +1,6 @@
-import type { Chan, ChId, EndAction, EqTab, Fx, LiveState, Macros, MidiMap, PlayMode, SceneId, SceneMix, Song, SoundCat, SoundId, SrcMode, Style, Tab, Zone } from './types';
-import { SCENES } from './types';
-import { SONGS, STYLE_BPM, applyLayers, defaultFx, defaultMidi, defaultMix, layersFor, PRESETS } from './data';
+import type { Chan, ChId, EndAction, EqTab, Fx, InId, InputCfg, LiveState, Macros, MidiMap, PlayMode, SceneId, SceneMix, Song, SoundCat, SoundId, SrcMode, StripGroup, Style, Tab, Zone } from './types';
+import { CH_IDS, SCENES } from './types';
+import { SONGS, STYLE_BPM, applyLayers, defaultChan, defaultFx, defaultInputs, defaultMidi, defaultMix, layersFor, PRESETS } from './data';
 import { clone } from '../util';
 
 export type LAction =
@@ -39,16 +39,18 @@ export type LAction =
   | { type: 'songAdd' }
   | { type: 'clearSolo' }
   | { type: 'editor'; id: ChId | null }
+  | { type: 'input'; id: InId; patch: Partial<InputCfg> }
+  | { type: 'group'; group: StripGroup }
   | { type: 'playPanel'; panel: 'keys' | 'pads' }
   | { type: 'save' }
   | { type: 'left'; open: boolean }
   | { type: 'toast'; text: string };
 
 const KEY = 'sonido.live.v2';
-type Saved = Pick<LiveState, 'songs' | 'songId' | 'sceneId' | 'mix' | 'fx' | 'master' | 'midi' | 'split' | 'transpose' | 'playMode' | 'src'>;
+type Saved = Pick<LiveState, 'songs' | 'songId' | 'sceneId' | 'mix' | 'fx' | 'master' | 'midi' | 'split' | 'transpose' | 'playMode' | 'src' | 'inputs'>;
 
 export function liveInit(): LiveState {
-  const base: Saved = { songs: SONGS, songId: 's2', sceneId: 'coro', mix: defaultMix(SONGS), fx: defaultFx(), master: -4.2, midi: defaultMidi(), split: 48, transpose: 0, playMode: 'follow', src: { pad: 'synth', drums: 'synth' } };
+  const base: Saved = { songs: SONGS, songId: 's2', sceneId: 'coro', mix: defaultMix(SONGS), fx: defaultFx(), master: -4.2, midi: defaultMidi(), split: 48, transpose: 0, playMode: 'follow', src: { pad: 'synth', drums: 'synth' }, inputs: defaultInputs() };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -58,14 +60,18 @@ export function liveInit(): LiveState {
   } catch {
     /* sin almacenamiento */
   }
+  // Completa canales que no existían cuando se guardaron las escenas.
+  for (const sg of Object.values(base.mix)) for (const m of Object.values(sg)) for (const id of CH_IDS) if (!m.chans[id]) m.chans[id] = defaultChan(id);
+  base.inputs = { ...defaultInputs(), ...(base.inputs ?? {}) };
+  for (const cfg of Object.values(base.inputs)) cfg.device = null; // los dispositivos se eligen en cada sesión
   return {
     ...base, selected: 'piano', tab: 'live', eqTab: 'eq', soundCat: 'Pianos', playing: false, files: {}, octave: 0, sustain: false,
-    clickMonitor: false, masterMute: false, dirty: false, leftOpen: false, editor: null, playPanel: 'keys', toast: null,
+    clickMonitor: false, masterMute: false, dirty: false, leftOpen: false, stripGroup: 'all', playPanel: 'keys', toast: null,
   };
 }
 
 export function liveSave(s: LiveState): boolean {
-  const out: Saved = { songs: s.songs, songId: s.songId, sceneId: s.sceneId, mix: s.mix, fx: s.fx, master: s.master, midi: s.midi, split: s.split, transpose: s.transpose, playMode: s.playMode, src: s.src };
+  const out: Saved = { songs: s.songs, songId: s.songId, sceneId: s.sceneId, mix: s.mix, fx: s.fx, master: s.master, midi: s.midi, split: s.split, transpose: s.transpose, playMode: s.playMode, src: s.src, inputs: s.inputs };
   try {
     localStorage.setItem(KEY, JSON.stringify(out));
     return true;
@@ -168,7 +174,9 @@ export function liveReducer(s: LiveState, a: LAction): LiveState {
       return say({ ...s, songs: [...s.songs, sg], mix: { ...s.mix, [id]: clone(defaultMix([sg])[id]) }, songId: id, sceneId: 'intro', dirty: true }, 'Canción añadida al repertorio');
     }
     case 'clearSolo': return edit(s, (m) => ({ ...m, chans: Object.fromEntries(Object.entries(m.chans).map(([k, c]) => [k, { ...c, solo: false }])) as SceneMix['chans'] }));
-    case 'editor': return { ...s, editor: a.id, selected: a.id ?? s.selected };
+    case 'editor': return a.id ? { ...s, selected: a.id, tab: 'channel' } : { ...s, tab: 'live' };
+    case 'input': return { ...s, dirty: true, inputs: { ...s.inputs, [a.id]: { ...s.inputs[a.id], ...a.patch } } };
+    case 'group': return { ...s, stripGroup: a.group };
     case 'playPanel': return { ...s, playPanel: a.panel };
     case 'save': {
       const ok = liveSave(s);

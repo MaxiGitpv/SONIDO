@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLive, Icon } from './ctx';
-import { CH_META, EQ_NAMES, presetsFor } from './data';
+import { CH_META, EQ_NAMES, chIcon, chName, presetsFor } from './data';
 import { CH_IDS } from './types';
 import type { Chan, ChId } from './types';
 import { BAND_COLORS, BandKnobs, CompCurve, CompKnobs, EqGraph, GrMeter } from './Center';
@@ -11,7 +11,7 @@ import { clone, dbToPos, fmtDb, fmtHz, posToDb } from '../util';
 
 /** Editor completo de un canal: EQ grande con zonas, mezclas rápidas, presets, filtros, compresor y A/B. */
 export function ChannelEditor({ id }: { id: ChId }) {
-  const { d, mix } = useLive();
+  const { s, d, mix } = useLive();
   const ch = mix.chans[id];
   const meta = CH_META[id];
   const [sel, setSel] = useState(3);
@@ -19,11 +19,6 @@ export function ChannelEditor({ id }: { id: ChId }) {
   const set = (fn: (c: Chan) => Chan) => d({ type: 'ch', id, fn });
 
   useEffect(() => setAb({ A: null, B: null, cur: null }), [id]);
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && d({ type: 'editor', id: null });
-    window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
-  }, [d]);
 
   const store = (slot: 'A' | 'B') => setAb((x) => ({ ...x, [slot]: clone(ch), cur: slot }));
   const recall = (slot: 'A' | 'B') => {
@@ -34,21 +29,21 @@ export function ChannelEditor({ id }: { id: ChId }) {
   };
 
   return (
-    <div className="ced-wrap" role="dialog" aria-modal="true" aria-label={`Editor de canal: ${meta.name}`}>
+    <div className="ced-page" aria-label={`Editor de canal: ${chName(s, id)}`}>
       <div className="ced" style={{ ['--cc' as string]: meta.color }}>
         <header className="ced-h">
-          <h2><Icon name={id} size={20} /> {meta.name} <small>Editor de canal</small></h2>
+          <button className="backbtn" onClick={() => d({ type: 'tab', tab: 'live' })}><Icon name="prev" size={18} /> Inicio</button>
+          <h2><Icon name={chIcon(id)} size={20} /> {chName(s, id)} <small>Editor de canal</small></h2>
           <nav className="ced-chs" aria-label="Canales">
             {CH_IDS.map((c) => (
               <button key={c} className={c === id ? 'on' : ''} style={{ ['--cc' as string]: CH_META[c].color }} onClick={() => d({ type: 'editor', id: c })}>
-                {CH_META[c].name}
+                {chName(s, c)}
               </button>
             ))}
           </nav>
           <div className="ced-acts">
             <button className={`mini${ch.solo ? ' on' : ''}`} aria-pressed={ch.solo} onClick={() => set((c) => ({ ...c, solo: !c.solo }))}>Solo</button>
             <button className={`mini${ch.mute ? ' warn' : ''}`} aria-pressed={ch.mute} onClick={() => set((c) => ({ ...c, mute: !c.mute }))}>{ch.mute ? 'Silenciado' : 'Mute'}</button>
-            <button className="iconbtn big" aria-label="Cerrar editor" onClick={() => d({ type: 'editor', id: null })}><Icon name="x" /></button>
           </div>
         </header>
 
@@ -123,7 +118,7 @@ export function ChannelEditor({ id }: { id: ChId }) {
             <h3>Salida</h3>
             <div className="ced-out-b">
               <div className="ced-fader">
-                <Fader label={`Nivel de ${meta.name}`} value={ch.fader} color={meta.color} meterKey={`live:${id}`} onChange={(v) => set((c) => ({ ...c, fader: v }))} />
+                <Fader label={`Nivel de ${chName(s, id)}`} value={ch.fader} color={meta.color} meterKey={`live:${id}`} onChange={(v) => set((c) => ({ ...c, fader: v }))} />
                 <b>{fmtDb(ch.fader)} dB</b>
               </div>
               <div className="ced-sends">

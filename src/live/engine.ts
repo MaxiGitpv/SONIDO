@@ -1,5 +1,5 @@
-import type { ChId, EndAction, Fx, PlayMode, SceneId, SceneMix, Section, SrcMode, Style } from './types';
-import { CH_IDS } from './types';
+import type { ChId, EndAction, Fx, InId, InputCfg, PlayMode, SceneId, SceneMix, Section, SrcMode, Style } from './types';
+import { CH_IDS, IN_IDS } from './types';
 import { GROOVES, PERC, PERC_HITS, at } from './rhythm';
 import type { Hit } from './rhythm';
 import { meterBus } from '../meterEngine';
@@ -101,6 +101,9 @@ class Engine {
   private files: Partial<Record<ChId, { buf: AudioBuffer; src: AudioBufferSourceNode | null; offset: number; start: number }>> = {};
   private drone: Handle[] = [];
   private last: ApplyInput | null = null;
+  private streams = new Map<string, { src: MediaStreamAudioSourceNode; split: ChannelSplitterNode; mono: GainNode }>();
+  private inNodes = {} as Record<InId, { trim: GainNode; pol: GainNode; an: AnalyserNode; from: AudioNode | null }>;
+  private pendingInputs: Partial<Record<InId, InputCfg>> = {};
   private peaks = new Map<string, { v: number; pk: number; t: number }>();
 
   ensure(): AudioContext {
@@ -109,6 +112,8 @@ class Engine {
       this.ctx = new Ctx({ latencyHint: 'interactive' });
       this.build(this.ctx);
       if (this.last) this.apply(this.last);
+      for (const [id, cfg] of Object.entries(this.pendingInputs) as [InId, InputCfg][]) void this.setInput(id, cfg).catch(() => undefined);
+      this.pendingInputs = {};
       this.meters();
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
@@ -214,6 +219,15 @@ class Engine {
       pan.connect(dly).connect(this.dlyIn);
       this.ch[id] = { dest, input, hpf, eq, lpf, comp, fader, pan, an, rev, dly };
     }
+    for (const id of IN_IDS) {
+      const trim = c.createGain();
+      const pol = c.createGain();
+      const an = c.createAnalyser();
+      an.fftSize = 1024;
+      trim.connect(pol).connect(this.ch[id].dest);
+      trim.connect(an);
+      this.inNodes[id] = { trim, pol, an, from: null };
+    }
   }
 
   apply(a: ApplyInput) {
@@ -270,6 +284,59 @@ class Engine {
       if (want && !f.src) this.startFile(id);
       if (!want && f.src) this.stopFile(id, true);
     }
+  }
+
+  /* ---------- Entradas reales: micrófonos e interfaces de audio ---------- */
+
+  /** Pide permiso para usar las entradas de audio y devuelve la lista de dispositivos. */
+  async inputDevices(ask: boolean): Promise<MediaDeviceInfo[]> {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('unsupported');
+    if (ask) {
+      const st = await navigator.mediaDevices.getUserMedia({ audio: true });
+      st.getTracks().forEach((t) => t.stop());
+    }
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return all.filter((d) => d.kind === 'audioinput');
+  }
+
+  /** Conecta (o desconecta) una entrada física a su canal. */
+  async setInput(id: InId, cfg: InputCfg) {
+    if (!this.ctx) {
+      this.pendingInputs[id] = cfg;
+      return;
+    }
+    const n = this.inNodes[id];
+    const t = this.ctx.currentTime;
+    n.trim.gain.setTargetAtTime(dbToLin(cfg.trim), t, 0.03);
+    n.pol.gain.setTargetAtTime(cfg.polarity ? -1 : 1, t, 0.01);
+    if (n.from) {
+      try {
+        n.from.disconnect(n.trim);
+      } catch {
+        /* ya desconectado */
+      }
+      n.from = null;
+    }
+    if (!cfg.device) return;
+    let s = this.streams.get(cfg.device);
+    if (!s) {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: cfg.device }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 2 } },
+      });
+      const src = this.ctx.createMediaStreamSource(stream);
+      const split = this.ctx.createChannelSplitter(2);
+      const mono = this.ctx.createGain();
+      mono.channelCount = 1;
+      mono.channelCountMode = 'explicit';
+      mono.channelInterpretation = 'speakers';
+      src.connect(split);
+      src.connect(mono);
+      s = { src, split, mono };
+      this.streams.set(cfg.device, s);
+    }
+    if (cfg.side === 'mix') s.mono.connect(n.trim);
+    else s.split.connect(n.trim, cfg.side === 'L' ? 0 : 1);
+    n.from = cfg.side === 'mix' ? s.mono : s.split;
   }
 
   /* ---------- Voces melódicas ---------- */
@@ -878,6 +945,10 @@ class Engine {
       for (const id of CH_IDS) {
         const m = smooth(`ch:${id}`, peakOf(this.ch[id].an));
         meterBus.publish(`live:${id}`, { l: m.v, r: m.v, pl: m.pk, pr: m.pk });
+      }
+      for (const id of IN_IDS) {
+        const m = smooth(`in:${id}`, peakOf(this.inNodes[id].an));
+        meterBus.publish(`in:${id}`, { l: m.v, r: m.v, pl: m.pk, pr: m.pk });
       }
       const l = smooth('mL', peakOf(this.anL));
       const r = smooth('mR', peakOf(this.anR));

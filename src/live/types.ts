@@ -1,7 +1,28 @@
 import type { Comp, EqBand, Hpf } from '../types';
 
-export type ChId = 'piano' | 'pad' | 'organ' | 'strings' | 'voz' | 'guitarra' | 'bajo' | 'drums' | 'perc' | 'tracks' | 'click';
-export const CH_IDS: ChId[] = ['piano', 'pad', 'organ', 'strings', 'voz', 'guitarra', 'bajo', 'drums', 'perc', 'tracks', 'click'];
+export type InId = 'in1' | 'in2' | 'in3' | 'in4' | 'in5' | 'in6';
+export const IN_IDS: InId[] = ['in1', 'in2', 'in3', 'in4', 'in5', 'in6'];
+export type ChId = 'piano' | 'pad' | 'organ' | 'strings' | 'voz' | 'guitarra' | 'bajo' | 'drums' | 'perc' | InId | 'tracks' | 'click';
+export const INST_IDS: ChId[] = ['piano', 'pad', 'organ', 'strings', 'voz', 'guitarra', 'bajo', 'drums', 'perc'];
+export const CH_IDS: ChId[] = [...INST_IDS, ...IN_IDS, 'tracks', 'click'];
+export const isInput = (id: ChId): id is InId => (IN_IDS as string[]).includes(id);
+
+export type InType = 'dinamico' | 'condensador' | 'inalambrico' | 'di' | 'linea';
+export const IN_TYPES: { id: InType; label: string }[] = [
+  { id: 'dinamico', label: 'Micrófono dinámico' },
+  { id: 'condensador', label: 'Micrófono de condensador' },
+  { id: 'inalambrico', label: 'Micrófono inalámbrico' },
+  { id: 'di', label: 'Instrumento (caja DI)' },
+  { id: 'linea', label: 'Línea (teclado, consola, reproductor)' },
+];
+export interface InputCfg {
+  name: string;
+  type: InType;
+  device: string | null; // deviceId del navegador
+  side: 'mix' | 'L' | 'R';
+  trim: number; // dB digitales
+  polarity: boolean;
+}
 /** Canales que se pueden tocar desde el teclado o los cuadros. */
 export const PLAYABLE: ChId[] = ['piano', 'pad', 'organ', 'strings', 'voz', 'guitarra', 'bajo'];
 /** Canales que pueden sonar desde un archivo en lugar del sintetizador. */
@@ -101,7 +122,8 @@ export interface MidiMap {
   ch: number;
 }
 
-export type Tab = 'live' | 'sounds' | 'mixer' | 'routes' | 'midi';
+export type Tab = 'live' | 'scenes' | 'play' | 'sounds' | 'mixer' | 'channel' | 'fx' | 'inputs' | 'routes' | 'midi';
+export type StripGroup = 'all' | 'inst' | 'inputs' | 'tracks';
 export type EqTab = 'eq' | 'comp' | 'reverb' | 'delay';
 export type PlayMode = 'follow' | 'loop';
 export type SrcMode = 'synth' | 'file';
@@ -130,7 +152,8 @@ export interface LiveState {
   midi: MidiMap[];
   dirty: boolean;
   leftOpen: boolean;
-  editor: ChId | null;
+  inputs: Record<InId, InputCfg>;
+  stripGroup: StripGroup;
   playPanel: 'keys' | 'pads';
   toast: { id: number; text: string } | null;
 }

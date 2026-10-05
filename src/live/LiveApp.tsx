@@ -3,18 +3,23 @@ import { LiveCtx, Icon } from './ctx';
 import type { LiveCtxValue } from './ctx';
 import { liveInit, liveReducer } from './store';
 import { CH_META, KEY_SEMI } from './data';
-import type { ChId, SceneId, Tab } from './types';
+import type { ChId, InId, InputCfg, SceneId, Tab } from './types';
+import { IN_IDS } from './types';
 import { engine } from './engine';
 import { Repertoire, SoundBank } from './Left';
 import { ChannelFx, PlayPanel, SceneBar, SongHeader } from './Center';
+import { Expand } from './nav';
+import { ChannelPage, FxPage, InputsPage, PlayPage, ScenesPage } from './Pages';
 import { StripRow } from './Strips';
 import { RightPanel } from './Right';
 import { Footer } from './Footer';
-import { ChannelEditor } from './ChannelEditor';
 import { MidiView, MixerView, RoutesView, SoundsView } from './Views';
 import { useMedia } from '../ctx';
 
-const TABS: [Tab, string][] = [['live', 'En vivo'], ['sounds', 'Sonidos'], ['mixer', 'Mezcla'], ['routes', 'Rutas'], ['midi', 'MIDI']];
+const TABS: [Tab, string, string][] = [
+  ['live', 'Inicio', 'master'], ['scenes', 'Escenas', 'list'], ['play', 'Tocar', 'keys'], ['sounds', 'Sonidos', 'layers'], ['mixer', 'Mezcla', 'sliders'],
+  ['channel', 'Canal', 'expand'], ['fx', 'Efectos', 'pad'], ['inputs', 'Entradas', 'voz'], ['routes', 'Rutas', 'next'], ['midi', 'MIDI', 'keys'],
+];
 const PC_KEYS: Record<string, number> = { a: 60, w: 61, s: 62, e: 63, d: 64, f: 65, t: 66, g: 67, y: 68, h: 69, u: 70, j: 71, k: 72, o: 73, l: 74 };
 
 export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance') => void }) {
@@ -36,6 +41,21 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
     engine.apply({ mix, fx: s.fx, master: s.master, masterMute: s.masterMute, clickMonitor: s.clickMonitor });
   }, [mix, s.fx, s.master, s.masterMute, s.clickMonitor, song, s.playMode, s.src]);
   useEffect(() => engine.syncSources(), [s.src]);
+
+  // Entradas físicas: se reconectan solo las que cambiaron.
+  const lastIn = useRef<Partial<Record<InId, string>>>({});
+  useEffect(() => {
+    for (const id of IN_IDS) {
+      const cfg: InputCfg = s.inputs[id];
+      const key = JSON.stringify([cfg.device, cfg.side, cfg.trim, cfg.polarity]);
+      if (lastIn.current[id] === key) continue;
+      lastIn.current[id] = key;
+      engine.setInput(id, cfg).catch((e: unknown) => {
+        const name = e instanceof Error ? e.name : '';
+        d({ type: 'toast', text: name === 'NotAllowedError' ? 'El navegador no dio permiso para esa entrada de audio' : `No se pudo abrir la entrada de ${cfg.name}` });
+      });
+    }
+  }, [s.inputs]);
 
   // Al cambiar de canción detenida, el cabezal vuelve al inicio de su arreglo.
   useEffect(() => {
@@ -190,9 +210,10 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
             </div>
           </div>
           <nav className="ltabs" aria-label="Secciones">
-            {TABS.map(([id, label]) => (
+            {TABS.map(([id, label, icon]) => (
               <button key={id} className={s.tab === id ? 'on' : ''} aria-current={s.tab === id ? 'page' : undefined} onClick={() => d({ type: 'tab', tab: id })}>
-                {label}
+                <Icon name={icon} size={15} />
+                <span>{label}</span>
               </button>
             ))}
           </nav>
@@ -221,7 +242,7 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
         </header>
 
         <div className={`lbody tab-${s.tab}`}>
-          {wide && left}
+          {wide && s.tab === 'live' && left}
           {!wide && s.leftOpen && (
             <>
               <div className="lscrim" onClick={() => d({ type: 'left', open: false })} />
@@ -233,6 +254,7 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
             <>
               <main className="lcenter">
                 <section className="lpanel songpanel">
+                  <div className="songpanel-x"><Expand tab="scenes" label="Escenas y repertorio" /></div>
                   <SongHeader />
                   <SceneBar />
                 </section>
@@ -248,6 +270,11 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
             </>
           ) : (
             <main className="lcenter wideview">
+              {s.tab === 'scenes' && <ScenesPage />}
+              {s.tab === 'play' && <PlayPage held={held} onDown={down} onUp={up} />}
+              {s.tab === 'channel' && <ChannelPage />}
+              {s.tab === 'fx' && <FxPage />}
+              {s.tab === 'inputs' && <InputsPage />}
               {s.tab === 'sounds' && <SoundsView />}
               {s.tab === 'mixer' && <MixerView />}
               {s.tab === 'routes' && <RoutesView />}
@@ -256,7 +283,6 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
           )}
         </div>
         <Footer />
-        {s.editor && <ChannelEditor id={s.editor} />}
         <div className="toast live-toast" role="status" aria-live="polite">{s.toast?.text}</div>
       </div>
     </LiveCtx.Provider>

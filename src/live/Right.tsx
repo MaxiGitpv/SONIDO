@@ -1,4 +1,5 @@
 import { useLive, Icon, fmtPct } from './ctx';
+import { Expand } from './nav';
 import { Knob } from '../components/Knob';
 import { engine } from './engine';
 import { fmtDb } from '../util';
@@ -17,15 +18,16 @@ function Macro({ k, label }: { k: keyof Macros; label: string }) {
   );
 }
 
-export function RightPanel() {
+export function RightPanel({ wide }: { wide?: boolean }) {
   const { s, d } = useLive();
   const fx = s.fx;
   return (
-    <aside className="rpanel">
+    <aside className={`rpanel${wide ? ' wide' : ''}`}>
       <section className="lpanel">
         <header className="ph">
           <Icon name="sliders" />
           <h3>Espacio y expresión</h3>
+          {!wide && <Expand tab="fx" label="Espacio y efectos" />}
         </header>
         <Macro k="ambience" label="Ambiente" />
         <Macro k="brightness" label="Brillo" />

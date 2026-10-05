@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useLive, Icon, Art } from './ctx';
-import { CH_META, SOUNDS, STYLE_BPM } from './data';
+import { CH_META, SOUNDS, STYLE_BPM, chIcon, chName } from './data';
+import { ModuleHead } from './nav';
 import { CH_IDS, STYLES } from './types';
 import type { ChId } from './types';
 import { engine } from './engine';
@@ -67,8 +68,8 @@ export function SoundsView() {
     window.setTimeout(() => { rel(); rel2(); rel3(); }, 1400);
   };
   return (
-    <div className="lview">
-      <h2>Sonidos <small>Pruebe cada sonido y asígnelo a la escena actual. Todos se sintetizan en el navegador.</small></h2>
+    <div className="mpage">
+      <ModuleHead title="Sonidos, ritmos y fuentes" desc="Pruebe cada sonido y asígnelo a la escena actual, elija el ritmo y cargue pads, loops o pistas propias." />
       <div className="sgrid">
         {SOUNDS.map((x) => (
           <article key={x.id} className={`scard2${mix.sound === x.id ? ' on' : ''}`}>
@@ -124,8 +125,8 @@ export function SoundsView() {
 
 export function MixerView() {
   return (
-    <div className="lview mixer">
-      <h2>Mezcla <small>Todos los canales con su medidor real. Toque el nombre de un canal para editar su EQ en «En vivo».</small></h2>
+    <div className="mpage mixer">
+      <ModuleHead title="Mezcla" desc="Todos los canales con su medidor real. Doble toque en el nombre o ⤢ abre el editor del canal." />
       <StripRow tall />
     </div>
   );
@@ -135,8 +136,8 @@ export function RoutesView() {
   const { mix, d, s } = useLive();
   const sl = (label: string, v: number, on: (x: number) => void) => <HSlider label={label} value={v} toPos={dbToPos} fromPos={posToDb} snap={(x) => (Math.abs(x) < 1 ? 0 : Math.round(x * 2) / 2)} onChange={on} />;
   return (
-    <div className="lview">
-      <h2>Rutas <small>Qué recibe el master y cuánto envía cada canal a los efectos.</small></h2>
+    <div className="mpage">
+      <ModuleHead title="Rutas" desc="Qué recibe el master y cuánto envía cada canal a los efectos." />
       <div className="routes2">
         <div className="rt-h"><span>Canal</span><span>Master</span><span>Envío a Hall Reverb</span><span>Envío a Delay</span></div>
         {CH_IDS.map((id) => {
@@ -144,14 +145,14 @@ export function RoutesView() {
           const isClick = id === 'click';
           return (
             <div key={id} className="rt-row" style={{ ['--cc' as string]: CH_META[id].color }}>
-              <span className="rt-n"><Icon name={id} size={16} /> {CH_META[id].name}</span>
+              <span className="rt-n"><Icon name={chIcon(id)} size={16} /> {chName(s, id)}</span>
               {isClick ? (
                 <button className={`mini${s.clickMonitor ? ' on' : ''}`} onClick={() => d({ type: 'clickMon', on: !s.clickMonitor })}>Solo monitor {s.clickMonitor ? 'ON' : 'OFF'}</button>
               ) : (
                 <button className={`mini${!c.mute ? ' on' : ''}`} aria-pressed={!c.mute} onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, mute: !x.mute }) })}>{c.mute ? 'Cortado' : 'Enviado'}</button>
               )}
-              <span className="rt-s">{sl(`${CH_META[id].name} a reverb`, c.sendRev, (v) => d({ type: 'ch', id, fn: (x) => ({ ...x, sendRev: v }) }))}<b>{fmtDb(c.sendRev)}</b></span>
-              <span className="rt-s">{sl(`${CH_META[id].name} a delay`, c.sendDly, (v) => d({ type: 'ch', id, fn: (x) => ({ ...x, sendDly: v }) }))}<b>{fmtDb(c.sendDly)}</b></span>
+              <span className="rt-s">{sl(`${chName(s, id)} a reverb`, c.sendRev, (v) => d({ type: 'ch', id, fn: (x) => ({ ...x, sendRev: v }) }))}<b>{fmtDb(c.sendRev)}</b></span>
+              <span className="rt-s">{sl(`${chName(s, id)} a delay`, c.sendDly, (v) => d({ type: 'ch', id, fn: (x) => ({ ...x, sendDly: v }) }))}<b>{fmtDb(c.sendDly)}</b></span>
             </div>
           );
         })}
@@ -170,8 +171,8 @@ export function MidiView() {
     </span>
   );
   return (
-    <div className="lview">
-      <h2>MIDI <small>Asignaciones guardadas. No hay ningún controlador MIDI conectado: hoy se usa el teclado en pantalla o el del computador (teclas A a K).</small></h2>
+    <div className="mpage">
+      <ModuleHead title="MIDI" desc="Asignaciones guardadas. No hay ningún controlador MIDI conectado: hoy se usa el teclado en pantalla o el del computador (teclas A a L)." />
       <div className="midi2">
         {s.midi.map((m) => (
           <div key={m.id} className="midi2-row">

@@ -1,6 +1,7 @@
 import { useLive, Icon, Art } from './ctx';
 import { CATS, SOUNDS, soundById } from './data';
 import { engine } from './engine';
+import { Expand } from './nav';
 
 export function Repertoire() {
   const { s, d } = useLive();
@@ -12,6 +13,7 @@ export function Repertoire() {
         <button className="iconbtn" aria-label="Añadir canción" title="Añadir canción" onClick={() => d({ type: 'songAdd' })}>
           <Icon name="plus" />
         </button>
+        <Expand tab="scenes" label="Escenas y repertorio" />
       </header>
       <p className="setlist">Domingo · Adoración</p>
       <ol className="songs">
@@ -39,6 +41,7 @@ export function SoundBank() {
       <header className="ph">
         <Icon name="layers" />
         <h3>Banco de sonidos</h3>
+        <Expand tab="sounds" label="Sonidos" />
       </header>
       <div className="cats" role="tablist">
         {CATS.map((c) => (

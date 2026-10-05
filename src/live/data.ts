@@ -1,6 +1,6 @@
-import type { Chan, ChId, Fx, Layer, MidiMap, Section, Song, SceneId, SceneMix, SoundCat, SoundId, Style } from './types';
+import type { Chan, ChId, Fx, InId, InputCfg, Layer, MidiMap, Section, Song, SceneId, SceneMix, SoundCat, SoundId, Style } from './types';
 import type { EqBand } from '../types';
-import { CH_IDS, PLAYABLE, SCENES } from './types';
+import { CH_IDS, IN_IDS, PLAYABLE, SCENES, isInput } from './types';
 
 export const CH_META: Record<ChId, { name: string; color: string; badge: string }> = {
   piano: { name: 'Piano', color: '#35b4ff', badge: 'Sinte' },
@@ -12,6 +12,12 @@ export const CH_META: Record<ChId, { name: string; color: string; badge: string 
   bajo: { name: 'Bajo', color: '#5b8cff', badge: 'Sinte' },
   drums: { name: 'Batería', color: '#ff8a4c', badge: 'Sinte' },
   perc: { name: 'Percusión', color: '#e6c84a', badge: 'Sinte' },
+  in1: { name: 'Pastor', color: '#ff7aa8', badge: 'Entrada' },
+  in2: { name: 'Voz principal', color: '#ff9a6b', badge: 'Entrada' },
+  in3: { name: 'Coros 1', color: '#ffc46b', badge: 'Entrada' },
+  in4: { name: 'Coros 2', color: '#e8e06b', badge: 'Entrada' },
+  in5: { name: 'Guitarra acústica', color: '#7be0b0', badge: 'Entrada' },
+  in6: { name: 'Teclado externo', color: '#7bc8ff', badge: 'Entrada' },
   tracks: { name: 'Tracks', color: '#9fb0c8', badge: 'Archivo' },
   click: { name: 'Click', color: '#8da2bd', badge: 'Solo monitores' },
 };
@@ -47,6 +53,12 @@ export const LAYER_INFO: Record<ChId, { name: string; desc: string }> = {
   voz: { name: 'Choir Ooh', desc: 'Coro sintético' },
   guitarra: { name: 'Clean Guitar', desc: 'Guitarra limpia' },
   bajo: { name: 'Finger Bass', desc: 'Bajo eléctrico' },
+  in1: { name: 'Pastor', desc: '' },
+  in2: { name: 'Voz principal', desc: '' },
+  in3: { name: 'Coros 1', desc: '' },
+  in4: { name: 'Coros 2', desc: '' },
+  in5: { name: 'Guitarra acústica', desc: '' },
+  in6: { name: 'Teclado externo', desc: '' },
   drums: { name: 'Batería', desc: '' },
   perc: { name: 'Percusión', desc: '' },
   tracks: { name: 'Tracks', desc: '' },
@@ -84,12 +96,12 @@ const mk = (id: ChId, fader: number, mute: boolean, pan = 0): Chan => ({
   pan,
   mute,
   solo: false,
-  hpf: { on: !['click', 'bajo', 'drums'].includes(id), freq: id === 'piano' || id === 'organ' ? 60 : id === 'guitarra' || id === 'voz' ? 110 : 40 },
+  hpf: { on: !['click', 'bajo', 'drums', 'in6'].includes(id), freq: id === 'piano' || id === 'organ' ? 60 : id === 'guitarra' || id === 'voz' || isInput(id) ? 100 : 40 },
   lpf: { on: false, freq: 18000 },
   eqOn: true,
   eq: flatEq(),
-  comp: { on: ['voz', 'guitarra', 'bajo', 'drums'].includes(id), threshold: id === 'drums' ? -14 : -20, ratio: id === 'bajo' ? 4 : 3, attack: id === 'drums' ? 25 : 15, release: 200, makeup: 2 },
-  sendRev: id === 'pad' || id === 'strings' ? -14 : id === 'piano' || id === 'voz' ? -20 : id === 'drums' ? -26 : -90,
+  comp: { on: ['voz', 'guitarra', 'bajo', 'drums', 'in1', 'in2', 'in3', 'in4'].includes(id), threshold: id === 'drums' ? -14 : -20, ratio: id === 'bajo' ? 4 : 3, attack: id === 'drums' ? 25 : 15, release: 200, makeup: 2 },
+  sendRev: id === 'pad' || id === 'strings' ? -14 : id === 'piano' || id === 'voz' || id === 'in2' || id === 'in3' || id === 'in4' ? -20 : id === 'drums' ? -26 : -90,
   sendDly: id === 'voz' || id === 'guitarra' ? -22 : -90,
 });
 
@@ -108,7 +120,15 @@ const MACROS: Record<SceneId, SceneMix['macros']> = {
   puente: { ambience: 0.5, brightness: 0.4, expression: 0.8 },
   final: { ambience: 0.6, brightness: 0.5, expression: 0.9 },
 };
-const LEVEL: Partial<Record<ChId, number>> = { voz: -6, guitarra: -11, bajo: -6, drums: -5, perc: -10, tracks: -9, click: -14 };
+const LEVEL: Partial<Record<ChId, number>> = { voz: -6, guitarra: -11, bajo: -6, drums: -5, perc: -10, tracks: -9, click: -14, in1: -6, in2: -6, in3: -9, in4: -9, in5: -9, in6: -9 };
+
+/** Canal con sus valores iniciales (también sirve para completar escenas guardadas con versiones anteriores). */
+export const defaultChan = (id: ChId): Chan => mk(id, LEVEL[id] ?? -9, !['tracks', 'click'].includes(id), id === 'guitarra' ? 18 : id === 'perc' ? -15 : 0);
+
+export const defaultInputs = (): Record<InId, InputCfg> => {
+  const types: InputCfg['type'][] = ['inalambrico', 'dinamico', 'dinamico', 'condensador', 'di', 'linea'];
+  return Object.fromEntries(IN_IDS.map((id, i) => [id, { name: CH_META[id].name, type: types[i], device: null, side: 'mix', trim: 0, polarity: false }])) as Record<InId, InputCfg>;
+};
 
 export function layersFor(sound: SoundId): Layer[] {
   return soundById(sound).layers.map((l, i) => ({ ch: l.ch, zone: i === 0 ? 'all' : 'high' }));
@@ -128,7 +148,7 @@ export function applyLayers(chans: SceneMix['chans'], layers: Layer[]): SceneMix
 
 export function sceneMix(scene: SceneId): SceneMix {
   const chans = {} as SceneMix['chans'];
-  for (const id of CH_IDS) chans[id] = mk(id, LEVEL[id] ?? -9, !['tracks', 'click'].includes(id), id === 'guitarra' ? 18 : id === 'perc' ? -15 : 0);
+  for (const id of CH_IDS) chans[id] = defaultChan(id);
   for (const id of EXTRA[scene]) chans[id] = { ...chans[id], mute: false };
   const sound = SCENE_SOUND[scene];
   const layers = layersFor(sound);
@@ -190,6 +210,8 @@ export const PRESETS: ChanPreset[] = [
 
 export const presetsFor = (id: ChId) => PRESETS.filter((p) => p.for === 'all' || p.for.includes(id));
 export const isPlayable = (id: ChId) => PLAYABLE.includes(id);
+export const chName = (s: { inputs: Record<InId, InputCfg> }, id: ChId) => (isInput(id) ? s.inputs[id].name : CH_META[id].name);
+export const chIcon = (id: ChId) => (id === 'in5' ? 'guitarra' : id === 'in6' ? 'keys' : isInput(id) ? 'voz' : id);
 
 const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
 export const noteName = (n: number) => `${NAMES[((n % 12) + 12) % 12]}${Math.floor(n / 12) - 1}`;

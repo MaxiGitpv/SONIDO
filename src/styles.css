@@ -1,6 +1,7 @@
 @import './perf/perf.css';
 @import './live/live.css';
 @import './live/live2.css';
+@import './live/live3.css';
 /* Consola de iglesia: cabecera, barra de mezcla, panel de canal arriba, bancos de canales al centro y master fijo a la derecha. */
 :root {
   --bg: #0f1316;
