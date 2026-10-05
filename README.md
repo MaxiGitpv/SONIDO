@@ -1,6 +1,6 @@
 # SONIDO
 
-Prototipo interactivo (React + TypeScript). La vista principal es **SONIDO Live Workspace**: repertorio, escenas, sonido en capas, teclado tocable, EQ/compresor/reverb/delay y canales con medidores, todo con audio real generado en el navegador (Web Audio). Se puede cargar un archivo de audio propio en el canal Tracks.
+Prototipo interactivo (React + TypeScript). La vista principal es **SONIDO Live Workspace**: repertorio, escenas, sonido en capas, teclado tocable, EQ/compresor/reverb/delay y canales con medidores, todo con audio real generado en el navegador (Web Audio). Incluye línea de tiempo por secciones (seguir arreglo o repetir sección, cambios al compás), ritmos con batería, bajo y percusión sintetizados (Worship, Balada, Júbilo, Funk, Salsa, Tumbao, Merengue, Samba), cuadros para tocar acordes, golpes y fondos, capas de sonido editables por zona del teclado, editor de canal con EQ de 6 bandas, filtros, presets y A/B, y carga de archivos propios para Tracks, pad de fondo y batería.
 
 Desde el engranaje se abren las versiones anteriores:
 

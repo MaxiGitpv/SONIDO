@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useLive, Icon, Art } from './ctx';
-import { CH_META, SOUNDS } from './data';
-import { CH_IDS } from './types';
+import { CH_META, SOUNDS, STYLE_BPM } from './data';
+import { CH_IDS, STYLES } from './types';
 import type { ChId } from './types';
 import { engine } from './engine';
 import { StripRow } from './Strips';
@@ -33,8 +33,33 @@ function Drawbar({ i, v }: { i: number; v: number }) {
   );
 }
 
+function SourceCard({ id, title, desc }: { id: 'pad' | 'drums' | 'tracks'; title: string; desc: string }) {
+  const { s, d, loadFile } = useLive();
+  const input = useRef<HTMLInputElement>(null);
+  const name = s.files[id];
+  const mode = id === 'tracks' ? 'file' : s.src[id];
+  return (
+    <article className="srccard" style={{ ['--cc' as string]: CH_META[id].color }}>
+      <h4><Icon name={id === 'tracks' ? 'tracks' : id} size={16} /> {title}</h4>
+      <p>{desc}</p>
+      <input ref={input} type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadFile(id, f); e.target.value = ''; }} />
+      <div className="src-row">
+        <button className="mini" onClick={() => input.current?.click()}><Icon name="upload" size={14} /> {name ? 'Cambiar archivo' : 'Cargar archivo'}</button>
+        {id !== 'tracks' && (
+          <div className="segx sm" role="group" aria-label={`Fuente de ${title}`}>
+            <button className={mode === 'synth' ? 'on' : ''} onClick={() => d({ type: 'src', ch: id, mode: 'synth' })}>Sintetizado</button>
+            <button className={mode === 'file' ? 'on' : ''} disabled={!name} onClick={() => d({ type: 'src', ch: id, mode: 'file' })}>Archivo</button>
+          </div>
+        )}
+      </div>
+      <small className="src-name">{name ? `Archivo: ${name}` : 'Sin archivo cargado'}</small>
+    </article>
+  );
+}
+
 export function SoundsView() {
   const { s, d, mix } = useLive();
+  const song = s.songs.find((x) => x.id === s.songId)!;
   const preview = (ids: ChId[]) => {
     const rel = engine.noteOn(ids, 60);
     const rel2 = engine.noteOn(ids, 64);
@@ -60,6 +85,27 @@ export function SoundsView() {
           </article>
         ))}
       </div>
+      <section className="organ2">
+        <h3>Ritmos de «{song.title}»</h3>
+        <p className="hint2">Batería, bajo y percusión sintetizados para cada estilo. Al elegir uno se ajusta el BPM sugerido; luego puede cambiarlo.</p>
+        <div className="styles">
+          {STYLES.map((x) => (
+            <button key={x.id} className={`stylebtn${song.style === x.id ? ' on' : ''}`} aria-pressed={song.style === x.id} onClick={() => d({ type: 'style', style: x.id })}>
+              <b>{x.label}</b>
+              <small>{STYLE_BPM[x.id]} BPM</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="organ2">
+        <h3>Pads de fondo, pistas y batería desde archivo</h3>
+        <p className="hint2">Cargue sus propios pads profesionales (por ejemplo un pad en la tonalidad de la canción), un loop de batería o una pista completa. Suenan en bucle, sincronizados con ▶. Los archivos se quedan en este navegador mientras la página esté abierta.</p>
+        <div className="srcgrid">
+          <SourceCard id="pad" title="Pad / fondo" desc="Reemplaza el pad sintetizado por su archivo." />
+          <SourceCard id="drums" title="Batería" desc="Use un loop de batería en lugar de la batería sintetizada." />
+          <SourceCard id="tracks" title="Tracks" desc="Pista completa, multitrack mezclado o secuencia." />
+        </div>
+      </section>
       <section className="organ2">
         <h3>Gospel Organ · rotary y drawbars</h3>
         <div className="organ2-row">

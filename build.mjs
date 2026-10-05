@@ -32,4 +32,6 @@ pv('pv-fx.html', "setTimeout(()=>{[...document.querySelectorAll('.tbtn')].find(b
 const lv = (name, script) => writeFileSync(name, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}<script>setTimeout(()=>{${script}},300)</script></body></html>`);
 lv('pv-live.html', "");
 lv('pv-play.html', "document.querySelector('.tp.play').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));document.querySelector('.tp.play').click()");
+lv('pv-pads.html', "setTimeout(()=>{[...document.querySelectorAll('.segx.sm button')].find(b=>b.textContent.includes('Cuadros')).click()},100)");
+lv('pv-ed.html', "setTimeout(()=>{document.querySelector('.cfx-open').click()},100)");
 lv('pv-tab.html', "[...document.querySelectorAll('.ltabs button')].find(b=>b.textContent==='Sonidos').click()");

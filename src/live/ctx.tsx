@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { Dispatch, ReactNode } from 'react';
-import type { ChId, LiveState, SceneMix } from './types';
+import type { ChId, LiveState, SceneId, SceneMix } from './types';
 import type { LAction } from './store';
 
 export interface LiveCtxValue {
@@ -8,6 +8,10 @@ export interface LiveCtxValue {
   d: Dispatch<LAction>;
   mix: SceneMix;
   audioOn: boolean;
+  /** Carga un archivo de audio en un canal (Tracks, Pad o Batería). */
+  loadFile: (ch: ChId, file: File) => Promise<void>;
+  /** Cambia de escena: al instante si está detenido, al compás siguiente si suena. */
+  goScene: (scene: SceneId) => void;
 }
 export const LiveCtx = createContext<LiveCtxValue | null>(null);
 export function useLive() {
@@ -47,6 +51,14 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     headphones: <>{P('M4 15v-3a8 8 0 0 1 16 0v3')}{P('M4 15h3v5H4zM17 15h3v5h-3z')}</>,
     upload: <>{P('M12 16V4M7 9l5-5 5 5')}{P('M4 20h16')}</>,
     menu: <>{P('M4 6h16M4 12h16M4 18h16')}</>,
+    bajo: <>{P('M17 3l4 4-7 7')}{P('M13 9a5 5 0 1 0-6 8l-3 3h4l1-2a5 5 0 0 0 4-9z')}</>,
+    drums: <>{P('M3 9c0-2 4-4 9-4s9 2 9 4-4 4-9 4-9-2-9-4z')}{P('M3 9v6c0 2 4 4 9 4s9-2 9-4V9')}{P('M8 3l3 5M16 3l-3 5')}</>,
+    perc: <>{P('M8 4h8l-1 16H9z')}{P('M8 8h8M9 14h6')}</>,
+    expand: <>{P('M4 14v6h6M20 10V4h-6M4 20l7-7M20 4l-7 7')}</>,
+    x: <>{P('M6 6l12 12M18 6L6 18')}</>,
+    loop: <>{P('M17 2l3 3-3 3')}{P('M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3')}{P('M20 13v2a4 4 0 0 1-4 4H4')}</>,
+    keys: <>{P('M3 5h18v14H3zM8 5v9M13 5v9M18 5v9')}</>,
+    grid: <>{P('M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z')}</>,
   };
   return (
     <svg className="ic" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

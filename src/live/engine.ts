@@ -1,12 +1,14 @@
-import type { ChId, Fx, SceneId, SceneMix } from './types';
+import type { ChId, EndAction, Fx, PlayMode, SceneId, SceneMix, Section, SrcMode, Style } from './types';
 import { CH_IDS } from './types';
+import { GROOVES, PERC, PERC_HITS, at } from './rhythm';
+import type { Hit } from './rhythm';
 import { meterBus } from '../meterEngine';
 import { FLOOR, dbToLin } from '../util';
 
 /*
  * Motor de audio en el navegador (Web Audio API). Todo lo que suena se genera aquí:
- * sintetizadores sencillos por canal, una pista de audio cargada por el usuario, EQ,
- * compresor, panorama, envíos a reverb y delay, y master con brillo y limitador.
+ * instrumentos sintetizados, batería y percusión, pistas de audio cargadas por el usuario,
+ * EQ de 6 bandas con filtros, compresor, panorama, envíos a reverb y delay, y master con limitador.
  */
 
 interface Handle {
@@ -15,10 +17,11 @@ interface Handle {
 }
 
 interface ChanNodes {
-  dest: AudioNode; // donde se conectan las voces
-  input: GainNode; // expresión
+  dest: AudioNode;
+  input: GainNode;
   hpf: BiquadFilterNode;
   eq: BiquadFilterNode[];
+  lpf: BiquadFilterNode;
   comp: DynamicsCompressorNode;
   fader: GainNode;
   pan: StereoPannerNode;
@@ -30,9 +33,13 @@ interface ChanNodes {
 export interface EngineInfo {
   bpm: number;
   key: number;
-  scene: SceneId;
   rhodes: boolean;
   drawbars: number[];
+  style: Style;
+  arr: Section[];
+  mode: PlayMode;
+  end: EndAction;
+  src: Record<'pad' | 'drums', SrcMode>;
 }
 
 export interface ApplyInput {
@@ -43,16 +50,28 @@ export interface ApplyInput {
   clickMonitor: boolean;
 }
 
+export interface Position {
+  sec: number;
+  bar: number; // compás dentro de la sección (0..)
+  beat: number; // 0..3
+  songBar: number; // compás absoluto en la canción
+  pending: number | null;
+}
+
 const mtof = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 const lin = (db: number) => (db <= -89.5 ? 0 : dbToLin(db));
 const DRAW_H = [0.5, 1.5, 1, 2, 3, 4, 5, 6, 8];
 const PROG: [number, boolean][] = [[0, false], [7, false], [9, true], [5, false]]; // I V vi IV
+const LATIN: Style[] = ['salsa', 'tumbao', 'merengue', 'samba'];
 
 class Engine {
   ctx: AudioContext | null = null;
-  info: EngineInfo = { bpm: 68, key: 9, scene: 'coro', rhodes: false, drawbars: [8, 8, 6, 0, 0, 0, 0, 0, 0] };
+  info: EngineInfo = { bpm: 68, key: 9, rhodes: false, drawbars: [8, 8, 6, 0, 0, 0, 0, 0, 0], style: 'worship', arr: [{ scene: 'verso', bars: 8 }], mode: 'follow', end: 'stop', src: { pad: 'synth', drums: 'synth' } };
   playing = false;
   onState: (() => void) | null = null;
+  onSection: ((sec: number) => void) | null = null;
+  onEnd: ((a: EndAction) => void) | null = null;
+
   private ch = {} as Record<ChId, ChanNodes>;
   private masterIn!: GainNode;
   private bright!: BiquadFilterNode;
@@ -67,19 +86,23 @@ class Engine {
   private dlyOut!: GainNode;
   private rotLfo!: OscillatorNode;
   private rotDepth!: GainNode;
+  private noise!: AudioBuffer;
+  private fxBus!: GainNode;
   private voices = new Set<Handle>();
   private timer = 0;
-  private step = 0;
+  private step = 0; // semicorchea dentro del compás actual (0..15) acumulada
   private nextTime = 0;
-  private trackBuf: AudioBuffer | null = null;
-  private trackSrc: AudioBufferSourceNode | null = null;
-  private trackOffset = 0;
-  private trackStart = 0;
-
+  private sec = 0;
+  private barInSec = 0;
+  private songBar = 0;
+  private pending: number | null = null;
+  private stopAt: number | null = null;
+  private bars: { t: number; sec: number; bar: number; songBar: number }[] = [];
+  private files: Partial<Record<ChId, { buf: AudioBuffer; src: AudioBufferSourceNode | null; offset: number; start: number }>> = {};
+  private drone: Handle[] = [];
   private last: ApplyInput | null = null;
   private peaks = new Map<string, { v: number; pk: number; t: number }>();
 
-  /** Crea o reanuda el contexto. Debe llamarse dentro de un gesto del usuario. */
   ensure(): AudioContext {
     if (!this.ctx) {
       const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -117,14 +140,12 @@ class Engine {
     split.connect(this.anL, 0);
     split.connect(this.anR, 1);
 
-    // Reverb: respuesta al impulso generada (ruido con caída exponencial).
     this.revIn = c.createGain();
     const conv = c.createConvolver();
     conv.buffer = impulse(c, 2.8, 2.6);
     this.revOut = c.createGain();
     this.revIn.connect(conv).connect(this.revOut).connect(this.masterIn);
 
-    // Delay a negra con realimentación filtrada.
     this.dlyIn = c.createGain();
     this.dlyNode = c.createDelay(2);
     this.dlyFb = c.createGain();
@@ -135,7 +156,6 @@ class Engine {
     this.dlyIn.connect(this.dlyNode).connect(tone).connect(this.dlyOut).connect(this.masterIn);
     tone.connect(this.dlyFb).connect(this.dlyNode);
 
-    // Rotary del órgano: trémolo con LFO.
     this.rotLfo = c.createOscillator();
     this.rotLfo.frequency.value = 0.8;
     this.rotDepth = c.createGain();
@@ -143,16 +163,31 @@ class Engine {
     this.rotLfo.connect(this.rotDepth);
     this.rotLfo.start();
 
+    this.fxBus = c.createGain();
+    this.fxBus.gain.value = 0.8;
+    this.fxBus.connect(this.masterIn);
+    const fxRev = c.createGain();
+    fxRev.gain.value = 0.3;
+    this.fxBus.connect(fxRev).connect(this.revIn);
+
+    const len = c.sampleRate;
+    this.noise = c.createBuffer(1, len, c.sampleRate);
+    const nd = this.noise.getChannelData(0);
+    for (let i = 0; i < len; i++) nd[i] = Math.random() * 2 - 1;
+
     for (const id of CH_IDS) {
       const input = c.createGain();
       const hpf = c.createBiquadFilter();
       hpf.type = 'highpass';
       hpf.Q.value = 0.707;
-      const eq = (['lowshelf', 'peaking', 'peaking', 'highshelf'] as BiquadFilterType[]).map((t) => {
+      const eq = (['lowshelf', 'peaking', 'peaking', 'peaking', 'peaking', 'highshelf'] as BiquadFilterType[]).map((t) => {
         const f = c.createBiquadFilter();
         f.type = t;
         return f;
       });
+      const lpf = c.createBiquadFilter();
+      lpf.type = 'lowpass';
+      lpf.Q.value = 0.707;
       const comp = c.createDynamicsCompressor();
       const fader = c.createGain();
       const pan = c.createStereoPanner();
@@ -172,16 +207,15 @@ class Engine {
       input.connect(hpf);
       let node: AudioNode = hpf;
       for (const f of eq) node = node.connect(f);
-      node.connect(comp).connect(fader).connect(pan);
+      node.connect(lpf).connect(comp).connect(fader).connect(pan);
       pan.connect(an);
       pan.connect(this.masterIn);
       pan.connect(rev).connect(this.revIn);
       pan.connect(dly).connect(this.dlyIn);
-      this.ch[id] = { dest, input, hpf, eq, comp, fader, pan, an, rev, dly };
+      this.ch[id] = { dest, input, hpf, eq, lpf, comp, fader, pan, an, rev, dly };
     }
   }
 
-  /** Lleva todos los parámetros del estado al grafo de audio, con rampas cortas. */
   apply(a: ApplyInput) {
     this.last = a;
     const c = this.ctx;
@@ -196,7 +230,9 @@ class Engine {
       const n = this.ch[id];
       set(n.input.gain, id === 'pad' || id === 'strings' || id === 'organ' || id === 'voz' ? expr : 1);
       set(n.hpf.frequency, s.hpf.on ? s.hpf.freq : 10);
+      set(n.lpf.frequency, s.lpf.on ? s.lpf.freq : 22000);
       s.eq.forEach((b, i) => {
+        if (!n.eq[i]) return;
         set(n.eq[i].frequency, b.freq);
         set(n.eq[i].gain, s.eqOn && b.on ? b.gain : 0);
         set(n.eq[i].Q, b.q);
@@ -224,16 +260,27 @@ class Engine {
     set(this.masterGain.gain, a.masterMute ? 0 : lin(a.master), 0.05);
   }
 
-  /* ---------- Voces ---------- */
+  /** Cambia la fuente de un canal (sintetizador o archivo) sin detener la reproducción. */
+  syncSources() {
+    if (!this.playing) return;
+    for (const id of ['pad', 'drums'] as const) {
+      const f = this.files[id];
+      if (!f) continue;
+      const want = this.info.src[id] === 'file';
+      if (want && !f.src) this.startFile(id);
+      if (!want && f.src) this.stopFile(id, true);
+    }
+  }
 
-  private voice(id: ChId, midi: number, t: number, vel = 0.8, dur?: number): Handle | null {
+  /* ---------- Voces melódicas ---------- */
+
+  private voice(id: ChId, midi: number, t: number, vel = 0.8, dur?: number, to?: AudioNode): Handle | null {
     const c = this.ctx;
     if (!c) return null;
-    const dest = this.ch[id].dest;
     const f = mtof(midi);
     const g = c.createGain();
     g.gain.value = 0;
-    g.connect(dest);
+    g.connect(to ?? this.ch[id].dest);
     const oscs: OscillatorNode[] = [];
     const osc = (type: OscillatorType, freq: number, gain: number, to: AudioNode = g, detune = 0) => {
       const o = c.createOscillator();
@@ -246,14 +293,20 @@ class Engine {
       oscs.push(o);
       return o;
     };
+    const lowpass = (freq: number, q = 0.7) => {
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = freq;
+      lp.Q.value = q;
+      lp.connect(g);
+      return lp;
+    };
     let rel = 0.15;
-    let natural = 6; // duración máxima de la voz
+    let natural = 6;
     switch (id) {
       case 'piano': {
-        const lp = c.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.connect(g);
         const decay = Math.max(0.6, 2.6 - (midi - 48) * 0.03);
+        const lp = lowpass(Math.min(12000, f * 9 + 1500));
         lp.frequency.setValueAtTime(Math.min(12000, f * 9 + 1500), t);
         lp.frequency.setTargetAtTime(f * 2.5 + 300, t + 0.02, decay * 0.6);
         if (this.info.rhodes) {
@@ -274,11 +327,7 @@ class Engine {
         break;
       }
       case 'pad': {
-        const lp = c.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.frequency.value = 1400;
-        lp.Q.value = 0.8;
-        lp.connect(g);
+        const lp = lowpass(1400, 0.8);
         [-9, 0, 8].forEach((d) => osc('sawtooth', f, 0.33, lp, d));
         g.gain.setValueAtTime(0, t);
         g.gain.linearRampToValueAtTime(0.09 * vel, t + 1.1);
@@ -297,10 +346,7 @@ class Engine {
         break;
       }
       case 'strings': {
-        const lp = c.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.frequency.value = 2600;
-        lp.connect(g);
+        const lp = lowpass(2600);
         [-14, -5, 6, 15].forEach((d) => osc('sawtooth', f, 0.25, lp, d));
         g.gain.setValueAtTime(0, t);
         g.gain.linearRampToValueAtTime(0.07 * vel, t + 0.6);
@@ -338,12 +384,9 @@ class Engine {
         break;
       }
       case 'guitarra': {
-        const lp = c.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.Q.value = 2;
+        const lp = lowpass(4200, 2);
         lp.frequency.setValueAtTime(4200, t);
         lp.frequency.setTargetAtTime(600, t, 0.12);
-        lp.connect(g);
         osc('sawtooth', f, 0.6, lp);
         osc('square', f * 2, 0.12, lp, 4);
         g.gain.setValueAtTime(0, t);
@@ -351,6 +394,20 @@ class Engine {
         g.gain.setTargetAtTime(0, t + 0.005, 0.32);
         rel = 0.08;
         natural = 1.6;
+        break;
+      }
+      case 'bajo': {
+        const lp = lowpass(900, 1.2);
+        lp.frequency.setValueAtTime(1400, t);
+        lp.frequency.setTargetAtTime(380, t, 0.09);
+        osc('sawtooth', f, 0.45, lp);
+        osc('sine', f, 0.9, lp);
+        osc('sine', f / 2, 0.25, lp);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.42 * vel, t + 0.004);
+        g.gain.setTargetAtTime(0.25 * vel, t + 0.01, 0.3);
+        rel = 0.07;
+        natural = 8;
         break;
       }
       case 'click': {
@@ -390,23 +447,150 @@ class Engine {
     return h;
   }
 
-  /** Nota en vivo desde el teclado gráfico. Devuelve la función para soltarla. */
+  /* ---------- Batería y percusión sintetizadas ---------- */
+
+  hit(name: Hit, when?: number, vel = 1, direct = false) {
+    const c = this.ensure();
+    const t = when ?? c.currentTime + 0.005;
+    const dest = direct ? this.fxBus : this.ch[PERC_HITS.includes(name) ? 'perc' : 'drums'].dest;
+    const out = c.createGain();
+    out.gain.value = vel * 0.55;
+    out.connect(dest);
+    const tone = (type: OscillatorType, f0: number, f1: number, sweep: number, decay: number, level: number) => {
+      const o = c.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + sweep);
+      const g = c.createGain();
+      g.gain.setValueAtTime(level, t);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + decay);
+      o.connect(g).connect(out);
+      o.start(t);
+      o.stop(t + decay + 0.05);
+    };
+    const noise = (type: BiquadFilterType, freq: number, q: number, decay: number, level: number, delay = 0) => {
+      const s = c.createBufferSource();
+      s.buffer = this.noise;
+      const f = c.createBiquadFilter();
+      f.type = type;
+      f.frequency.value = freq;
+      f.Q.value = q;
+      const g = c.createGain();
+      g.gain.setValueAtTime(level, t + delay);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + delay + decay);
+      s.connect(f).connect(g).connect(out);
+      s.start(t + delay, Math.random() * 0.5);
+      s.stop(t + delay + decay + 0.05);
+    };
+    switch (name) {
+      case 'kick': tone('sine', 150, 42, 0.09, 0.42, 1); tone('triangle', 900, 60, 0.02, 0.03, 0.3); break;
+      case 'snare': tone('triangle', 210, 160, 0.05, 0.12, 0.45); noise('bandpass', 1900, 0.7, 0.18, 0.7); break;
+      case 'clap': [0, 0.012, 0.024].forEach((dl) => noise('bandpass', 1300, 1.4, dl === 0.024 ? 0.2 : 0.02, 0.8, dl)); break;
+      case 'hat': noise('highpass', 7600, 0.8, 0.045, 0.32); break;
+      case 'ohat': noise('highpass', 7000, 0.8, 0.26, 0.28); break;
+      case 'crash': noise('highpass', 5200, 0.5, 1.6, 0.42); noise('bandpass', 9000, 0.6, 0.9, 0.2); break;
+      case 'tomH': tone('sine', 240, 170, 0.15, 0.32, 0.8); break;
+      case 'tomL': tone('sine', 150, 100, 0.18, 0.42, 0.85); break;
+      case 'rim': tone('square', 1700, 1500, 0.01, 0.035, 0.22); noise('bandpass', 3000, 2, 0.02, 0.3); break;
+      case 'conga': tone('sine', 330, 300, 0.05, 0.22, 0.75); noise('bandpass', 2500, 1.5, 0.015, 0.2); break;
+      case 'congaLo': tone('sine', 220, 195, 0.06, 0.3, 0.8); break;
+      case 'bongo': tone('sine', 520, 470, 0.03, 0.1, 0.5); break;
+      case 'cowbell': {
+        [540, 810].forEach((fq) => tone('square', fq, fq, 0.01, 0.28, 0.12));
+        break;
+      }
+      case 'guira': noise('highpass', 6500, 0.9, 0.05, 0.4); break;
+      case 'shaker': noise('bandpass', 7000, 1.2, 0.06, 0.32); break;
+      case 'clave': tone('sine', 2500, 2400, 0.01, 0.06, 0.55); break;
+      case 'tambora': tone('sine', 130, 105, 0.08, 0.26, 0.85); noise('bandpass', 1600, 1, 0.03, 0.3); break;
+      case 'surdo': tone('sine', 78, 60, 0.12, 0.6, 0.95); break;
+      case 'tamborim': tone('sine', 760, 700, 0.02, 0.07, 0.4); noise('bandpass', 4200, 1.4, 0.03, 0.3); break;
+    }
+  }
+
+  /** Efecto de subida (ruido filtrado) que dura dos compases. */
+  swell() {
+    const c = this.ensure();
+    const t = c.currentTime + 0.01;
+    const dur = (60 / this.info.bpm) * 8;
+    const s = c.createBufferSource();
+    s.buffer = this.noise;
+    s.loop = true;
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 2.5;
+    f.frequency.setValueAtTime(300, t);
+    f.frequency.exponentialRampToValueAtTime(9000, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + dur);
+    g.gain.setTargetAtTime(0, t + dur, 0.05);
+    s.connect(f).connect(g).connect(this.fxBus);
+    s.start(t);
+    s.stop(t + dur + 0.4);
+  }
+
+  /** Golpe grave de impacto con platillo. */
+  impact() {
+    const c = this.ensure();
+    const t = c.currentTime + 0.005;
+    this.hit('kick', t, 1.2, true);
+    this.hit('crash', t, 1.1, true);
+    const o = c.createOscillator();
+    o.frequency.setValueAtTime(70, t);
+    o.frequency.exponentialRampToValueAtTime(30, t + 1.2);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.9, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+    o.connect(g).connect(this.fxBus);
+    o.start(t);
+    o.stop(t + 1.7);
+  }
+
+  /** Fondo continuo (raíz y quinta de la tonalidad) en el canal Pad. */
+  setDrone(on: boolean) {
+    const c = this.ensure();
+    this.drone.forEach((h) => h.release());
+    this.drone = [];
+    if (!on) return;
+    const r = 48 + this.info.key;
+    this.drone = [r - 12, r, r + 7, r + 12].map((n) => this.voice('pad', n, c.currentTime + 0.01, 0.8, undefined, this.fxBus)!).filter(Boolean);
+    this.drone.forEach((h) => this.voices.delete(h));
+  }
+
+  /** Nota en vivo: devuelve la función para soltarla. */
   noteOn(ids: ChId[], midi: number, vel = 0.85): () => void {
     this.ensure();
     const t = this.ctx!.currentTime + 0.005;
-    const hs = ids.map((id) => this.voice(id, midi, t, vel)).filter(Boolean) as Handle[];
+    const hs = ids.map((id) => this.voice(id, id === 'bajo' ? midi - 12 : midi, t, vel)).filter(Boolean) as Handle[];
+    hs.forEach((h) => this.voices.delete(h));
     return () => hs.forEach((h) => h.release());
   }
 
-  /* ---------- Transporte y secuenciador ---------- */
+  /* ---------- Transporte, línea de tiempo y secuenciador ---------- */
+
+  /** Sitúa la reproducción al inicio de una sección (cuando está detenido). */
+  setSection(sec: number) {
+    if (this.playing) {
+      this.pending = sec;
+      return;
+    }
+    this.sec = Math.max(0, Math.min(sec, this.info.arr.length - 1));
+    this.barInSec = 0;
+    this.songBar = this.info.arr.slice(0, this.sec).reduce((a, x) => a + x.bars, 0);
+    this.step = 0;
+  }
 
   play() {
     const c = this.ensure();
     if (this.playing) return;
     this.playing = true;
+    this.stopAt = null;
+    this.bars = [];
+    this.step = 0;
     this.nextTime = c.currentTime + 0.08;
     this.timer = window.setInterval(() => this.tick(), 25);
-    this.startTrack();
+    this.startFiles();
     this.onState?.();
   }
 
@@ -414,24 +598,35 @@ class Engine {
     if (!this.playing) return;
     this.playing = false;
     window.clearInterval(this.timer);
-    this.stopTrack(true);
+    for (const id of Object.keys(this.files) as ChId[]) this.stopFile(id, true);
     this.releaseAll(0.15);
     this.onState?.();
   }
 
   stop() {
     this.pause();
-    this.step = 0;
-    this.trackOffset = 0;
+    this.setSection(0);
+    for (const f of Object.values(this.files)) if (f) f.offset = 0;
+    this.pending = null;
+    this.bars = [];
     this.onState?.();
   }
 
   panic() {
     this.releaseAll(0);
+    this.drone.forEach((h) => h.release(0));
+    this.drone = [];
   }
 
-  get bar() {
-    return Math.floor(this.step / 8) % 4;
+  position(): Position {
+    const base = { sec: this.sec, bar: this.barInSec, beat: 0, songBar: this.songBar, pending: this.pending };
+    if (!this.ctx || !this.playing) return base;
+    const now = this.ctx.currentTime;
+    let cur = this.bars[0];
+    for (const b of this.bars) if (b.t <= now) cur = b;
+    if (!cur) return base;
+    const beat = Math.min(3, Math.max(0, Math.floor((now - cur.t) / (60 / this.info.bpm))));
+    return { sec: cur.sec, bar: cur.bar, beat, songBar: cur.songBar, pending: this.pending };
   }
 
   private releaseAll(after: number) {
@@ -443,100 +638,197 @@ class Engine {
 
   private tick() {
     const c = this.ctx!;
-    const stepDur = 60 / this.info.bpm / 2;
+    const S = 60 / this.info.bpm / 4;
     while (this.nextTime < c.currentTime + 0.12) {
-      this.schedule(this.step, this.nextTime, stepDur);
-      this.nextTime += stepDur;
+      if (this.stopAt !== null) break;
+      const p = this.step % 16;
+      if (p === 0) this.barStart(this.nextTime);
+      if (this.stopAt !== null) break;
+      this.schedule(p, this.nextTime, S);
+      this.nextTime += S;
       this.step++;
     }
     const now = c.currentTime;
     this.voices.forEach((v) => v.end < now && this.voices.delete(v));
+    this.bars = this.bars.filter((b, i, arr) => i >= arr.length - 4 || b.t > now - 8);
   }
 
-  private schedule(step: number, t: number, S: number) {
-    const pos = step % 8;
-    const [deg, minor] = PROG[Math.floor(step / 8) % 4];
+  /** Decide qué sección suena en este compás: avanzar, repetir, saltar o terminar. */
+  private barStart(t: number) {
+    const arr = this.info.arr;
+    if (!arr.length) return;
+    let changed = false;
+    if (this.step > 0) {
+      this.barInSec++;
+      this.songBar++;
+      if (this.pending !== null) {
+        this.sec = this.pending;
+        this.barInSec = 0;
+        this.pending = null;
+        changed = true;
+      } else if (this.barInSec >= arr[this.sec].bars) {
+        this.barInSec = 0;
+        if (this.info.mode === 'follow') {
+          this.sec++;
+          changed = true;
+          if (this.sec >= arr.length) {
+            const end = this.info.end;
+            this.sec = 0;
+            if (end === 'stop') {
+              this.stopAt = t;
+              const delay = Math.max(0, (t - this.ctx!.currentTime) * 1000);
+              window.setTimeout(() => {
+                this.stop();
+                this.onEnd?.('stop');
+              }, delay);
+              return;
+            }
+            const delay = Math.max(0, (t - this.ctx!.currentTime) * 1000);
+            window.setTimeout(() => this.onEnd?.(end), delay);
+          }
+        }
+      }
+    } else changed = true;
+    if (changed) {
+      this.songBar = arr.slice(0, this.sec).reduce((a, x) => a + x.bars, 0) + this.barInSec;
+      const sec = this.sec;
+      const delay = Math.max(0, (t - this.ctx!.currentTime) * 1000);
+      window.setTimeout(() => this.onSection?.(sec), delay);
+      if (arr[sec].scene !== 'intro' && !LATIN.includes(this.info.style)) this.hit('crash', t, 0.7);
+    }
+    this.bars.push({ t, sec: this.sec, bar: this.barInSec, songBar: this.songBar });
+  }
+
+  private schedule(p: number, t: number, S: number) {
+    const arr = this.info.arr;
+    const section = arr[this.sec] ?? arr[0];
+    const scene: SceneId = section.scene;
+    const style = this.info.style;
+    const groove = GROOVES[style];
+    const [deg, minor] = PROG[this.barInSec % 4];
+    const [ndeg] = PROG[(this.barInSec + 1) % 4];
     const r = 48 + ((this.info.key + deg) % 12);
     const th = r + (minor ? 3 : 4);
     const fi = r + 7;
-    const n = (id: ChId, notes: number[], dur: number, vel = 0.8, spread = 0) =>
-      notes.forEach((m, i) => this.voice(id, m, t + i * spread, vel, dur));
-    const sc = this.info.scene;
+    const n = (id: ChId, notes: number[], dur: number, vel = 0.8, spread = 0) => notes.forEach((m, i) => this.voice(id, m, t + i * spread, vel, dur));
+    const even = p % 2 === 0;
+    const p8 = p / 2;
+    const local = this.barInSec * 16 + p; // para patrones de dos compases
+    const latin = LATIN.includes(style);
 
-    // Piano
-    if (sc === 'intro') {
-      if (pos === 0) n('piano', [r + 12, th + 12, fi + 12], S * 7.6, 0.55, 0.03);
-      if (pos === 4) n('piano', [fi + 24], S * 3, 0.45);
-    } else if (sc === 'verso') {
-      const arp = [r, fi, r + 12, th + 12, r + 12, fi, r + 12, th + 12];
-      n('piano', [arp[pos]], S * 1.8, 0.6);
-      if (pos === 0) n('piano', [r - 12], S * 7, 0.6);
-    } else if (sc === 'puente') {
-      if (pos === 0) n('piano', [th + 12, fi + 12, r + 24], S * 3.8, 0.6, 0.02);
-      if (pos === 5) n('piano', [fi + 12, r + 24], S * 2.8, 0.5, 0.02);
-    } else {
-      if (pos % 2 === 0) n('piano', [r + 12, th + 12, fi + 12].concat(sc === 'final' ? [r + 24] : []), S * 1.7, pos === 0 ? 0.85 : 0.68, 0.008);
-      if (pos === 0 || pos === 4) n('piano', [r - 12], S * 3.6, 0.75);
+    // Piano: patrón del estilo si lo tiene; si no, el de la escena.
+    if (groove.comp && scene !== 'intro') {
+      const c = at(groove.comp, local);
+      if (c) n('piano', [r + 12, th + 12, fi + 12], S * 1.6, 0.7, 0.006);
+      if (p === 0 && !latin) n('piano', [r - 12], S * 7, 0.6);
+    } else if (even) {
+      if (scene === 'intro') {
+        if (p8 === 0) n('piano', [r + 12, th + 12, fi + 12], S * 15, 0.55, 0.03);
+        if (p8 === 4) n('piano', [fi + 24], S * 6, 0.45);
+      } else if (scene === 'verso') {
+        const arp = [r, fi, r + 12, th + 12, r + 12, fi, r + 12, th + 12];
+        n('piano', [arp[p8]], S * 3.6, 0.6);
+        if (p8 === 0) n('piano', [r - 12], S * 14, 0.6);
+      } else if (scene === 'puente') {
+        if (p8 === 0) n('piano', [th + 12, fi + 12, r + 24], S * 7.6, 0.6, 0.02);
+        if (p8 === 5) n('piano', [fi + 12, r + 24], S * 5.6, 0.5, 0.02);
+      } else {
+        if (p8 % 2 === 0) n('piano', [r + 12, th + 12, fi + 12].concat(scene === 'final' ? [r + 24] : []), S * 3.4, p8 === 0 ? 0.85 : 0.68, 0.008);
+        if (p8 === 0 || p8 === 4) n('piano', [r - 12], S * 7.2, 0.75);
+      }
     }
-    // Pad, órgano, cuerdas: acorde por compás
-    if (pos === 0) {
-      n('pad', [r, fi, r + 12, th + 12], S * 8.05, 0.8);
-      n('organ', [r - 12, r, fi, th + 12], S * 7.9, 0.8);
-      n('strings', [fi, r + 12, th + 12, fi + 12], S * 8.05, 0.8);
+    // Pad, órgano, cuerdas: acorde por compás (si el pad no viene de un archivo)
+    if (p === 0) {
+      if (this.info.src.pad === 'synth' || !this.files.pad) n('pad', [r, fi, r + 12, th + 12], S * 16.1, 0.8);
+      n('organ', [r - 12, r, fi, th + 12], S * 15.8, 0.8);
+      n('strings', [fi, r + 12, th + 12, fi + 12], S * 16.1, 0.8);
+      n('voz', [th + 12], S * 7.8, 0.8);
     }
-    // Voz (coro "uh")
-    if (pos === 0) n('voz', [th + 12], S * 3.9, 0.8);
-    if (pos === 4) n('voz', [fi + 12], S * 3.9, 0.8);
-    // Guitarra: rasgueo
-    if ([0, 2, 3, 5, 6].includes(pos)) n('guitarra', pos % 2 ? [fi + 12, th + 12, r + 12] : [r, fi, r + 12, th + 12], S * 1.6, pos === 0 ? 0.9 : 0.6, 0.012);
+    if (p === 8) n('voz', [fi + 12], S * 7.8, 0.8);
+    // Guitarra
+    if (latin && groove.comp) {
+      if (at(groove.comp, local + 2)) n('guitarra', [r + 12, fi + 12, th + 24], S * 1.2, 0.55, 0.008);
+    } else if (even && [0, 2, 3, 5, 6].includes(p8)) {
+      n('guitarra', p8 % 2 ? [fi + 12, th + 12, r + 12] : [r, fi, r + 12, th + 12], S * 3.2, p8 === 0 ? 0.9 : 0.6, 0.012);
+    }
+    // Bajo
+    const b = groove.bass[local % groove.bass.length];
+    if (b && b !== '.') {
+      const root = 36 + ((this.info.key + deg) % 12);
+      const next = 36 + ((this.info.key + ndeg) % 12);
+      const note = b === 'R' ? root : b === '5' ? root + 7 : b === '8' ? root + 12 : b === '3' ? root + (minor ? 3 : 4) : b === 'a' ? next : root;
+      const len = groove.bass.slice((local % groove.bass.length) + 1).search(/[^.]/);
+      this.voice('bajo', note, t, 0.85, S * Math.max(1, Math.min(8, len < 0 ? 4 : len + 1)) * 0.9);
+    }
+    // Batería (si no viene de archivo) y percusión
+    if (this.info.src.drums === 'synth' || !this.files.drums) {
+      const fillBar = groove.fills && this.barInSec === section.bars - 1 && scene !== 'intro';
+      if (fillBar && p >= 12) this.hit(p % 2 ? 'snare' : p === 12 ? 'tomH' : 'tomL', t, 0.75);
+      else {
+        for (const [hit, pat] of Object.entries(groove.drums) as [Hit, string][]) {
+          const v = at(pat, local);
+          if (v) this.hit(hit, t, v === 'x' ? 1 : 0.55);
+        }
+      }
+    }
+    for (const [hit, pat] of Object.entries(PERC[style]) as [Hit, string][]) {
+      const v = at(pat, local);
+      if (v) this.hit(hit, t, v === 'x' ? 1 : 0.5);
+    }
     // Click a negras
-    if (pos % 2 === 0) this.voice('click', pos === 0 ? 96 : 84, t, pos === 0 ? 1 : 0.7);
+    if (p % 4 === 0) this.voice('click', p === 0 ? 96 : 84, t, p === 0 ? 1 : 0.7);
   }
 
-  /* ---------- Pista de audio ---------- */
+  /* ---------- Archivos de audio por canal ---------- */
 
-  async loadFile(file: File): Promise<number> {
+  async loadFile(id: ChId, file: File): Promise<number> {
     const c = this.ensure();
     const buf = await c.decodeAudioData(await file.arrayBuffer());
-    const wasPlaying = this.playing;
-    this.stopTrack(false);
-    this.trackBuf = buf;
-    this.trackOffset = 0;
-    if (wasPlaying) this.startTrack();
+    this.stopFile(id, false);
+    this.files[id] = { buf, src: null, offset: 0, start: 0 };
+    if (this.playing && (id === 'tracks' || this.info.src[id as 'pad' | 'drums'] === 'file')) this.startFile(id);
     return buf.duration;
   }
 
-  get hasTrack() {
-    return !!this.trackBuf;
+  hasFile(id: ChId) {
+    return !!this.files[id];
   }
 
-  trackTime(): { pos: number; dur: number } {
-    if (!this.trackBuf || !this.ctx) return { pos: 0, dur: 0 };
-    const dur = this.trackBuf.duration;
-    const pos = this.trackSrc ? this.trackOffset + (this.ctx.currentTime - this.trackStart) : this.trackOffset;
-    return { pos: pos % dur, dur };
+  fileTime(id: ChId): { pos: number; dur: number } {
+    const f = this.files[id];
+    if (!f || !this.ctx) return { pos: 0, dur: 0 };
+    const pos = f.src ? f.offset + (this.ctx.currentTime - f.start) : f.offset;
+    return { pos: pos % f.buf.duration, dur: f.buf.duration };
   }
 
-  private startTrack() {
-    if (!this.trackBuf || !this.ctx) return;
+  private startFiles() {
+    for (const id of Object.keys(this.files) as ChId[]) {
+      if (id === 'tracks' || this.info.src[id as 'pad' | 'drums'] === 'file') this.startFile(id);
+    }
+  }
+
+  private startFile(id: ChId) {
+    const f = this.files[id];
+    if (!f || !this.ctx || f.src) return;
     const src = this.ctx.createBufferSource();
-    src.buffer = this.trackBuf;
+    src.buffer = f.buf;
     src.loop = true;
-    src.connect(this.ch.tracks.dest);
-    this.trackStart = this.ctx.currentTime;
-    src.start(0, this.trackOffset % this.trackBuf.duration);
-    this.trackSrc = src;
+    src.connect(this.ch[id].dest);
+    f.start = this.ctx.currentTime;
+    src.start(0, f.offset % f.buf.duration);
+    f.src = src;
   }
 
-  private stopTrack(keep: boolean) {
-    if (!this.trackSrc || !this.ctx) return;
-    if (keep) this.trackOffset += this.ctx.currentTime - this.trackStart;
+  private stopFile(id: ChId, keep: boolean) {
+    const f = this.files[id];
+    if (!f?.src || !this.ctx) return;
+    if (keep) f.offset += this.ctx.currentTime - f.start;
     try {
-      this.trackSrc.stop();
+      f.src.stop();
     } catch {
       /* ya detenido */
     }
-    this.trackSrc = null;
+    f.src = null;
   }
 
   /* ---------- Medición ---------- */
@@ -547,7 +839,6 @@ class Engine {
     return true;
   }
 
-  /** Reducción de ganancia actual del compresor del canal, en dB (negativa o 0). */
   reduction(id: ChId): number {
     return this.ctx ? this.ch[id].comp.reduction : 0;
   }

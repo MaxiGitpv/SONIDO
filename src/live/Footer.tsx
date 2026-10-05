@@ -7,32 +7,21 @@ import { clamp } from '../util';
 const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 export function Footer() {
-  const { s, d } = useLive();
+  const { s, d, loadFile } = useLive();
   const file = useRef<HTMLInputElement>(null);
   const taps = useRef<number[]>([]);
   const [tt, setTt] = useState('');
   const song = s.songs.find((x) => x.id === s.songId)!;
+  const track = s.files.tracks;
 
   useEffect(() => {
-    if (!s.trackName) return;
+    if (!track) return;
     const id = window.setInterval(() => {
-      const { pos, dur } = engine.trackTime();
+      const { pos, dur } = engine.fileTime('tracks');
       setTt(`${mmss(pos)} / ${mmss(dur)}`);
     }, 250);
     return () => window.clearInterval(id);
-  }, [s.trackName]);
-
-  const load = async (f: File | undefined) => {
-    if (!f) return;
-    try {
-      await engine.loadFile(f);
-      d({ type: 'track', name: f.name });
-      d({ type: 'ch', id: 'tracks', fn: (c) => ({ ...c, mute: false }) });
-      d({ type: 'toast', text: `Pista «${f.name}» cargada en el canal Tracks` });
-    } catch {
-      d({ type: 'toast', text: 'No se pudo leer ese archivo. Pruebe con MP3, WAV, M4A u OGG.' });
-    }
-  };
+  }, [track]);
 
   const tap = () => {
     const now = performance.now();
@@ -46,18 +35,18 @@ export function Footer() {
 
   return (
     <footer className="lfoot">
-      <input ref={file} type="file" accept="audio/*" hidden onChange={(e) => { void load(e.target.files?.[0]); e.target.value = ''; }} />
+      <input ref={file} type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadFile('tracks', f); e.target.value = ''; }} />
       <button className="fbtn tracks" onClick={() => file.current?.click()} title="Cargar un archivo de audio en el canal Tracks">
         <Icon name="upload" />
         <span className="tr-t">
           <b>Tracks</b>
-          <small>{s.trackName ? `${s.trackName} · ${tt}` : 'Cargar audio…'}</small>
+          <small>{track ? `${track} · ${tt}` : 'Cargar audio…'}</small>
         </span>
       </button>
       <div className="transport">
         <button className={`tp play${s.playing ? ' on' : ''}`} aria-label="Reproducir" onClick={() => engine.play()}><Icon name="play" size={22} /></button>
         <button className="tp" aria-label="Pausa" onClick={() => engine.pause()}><Icon name="pause" size={20} /></button>
-        <button className="tp" aria-label="Detener" onClick={() => engine.stop()}><Icon name="stop" size={18} /></button>
+        <button className="tp" aria-label="Detener y volver al inicio" onClick={() => { engine.stop(); d({ type: 'scene', id: song.arr[0]?.scene ?? 'intro' }); }}><Icon name="stop" size={18} /></button>
       </div>
       <button className="fbtn tap" onClick={tap}>Tap tempo <b>{song.bpm}</b></button>
       <button className={`fbtn mon${s.clickMonitor ? ' on' : ''}`} aria-pressed={s.clickMonitor} onClick={() => d({ type: 'clickMon', on: !s.clickMonitor })} title="Oír el click (canal solo para monitores)">

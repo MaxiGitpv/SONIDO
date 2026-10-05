@@ -2,10 +2,10 @@ import type { Channel, Comp } from './types';
 
 const FS = 48000;
 
-type Kind = 'peak' | 'lowshelf' | 'highshelf' | 'highpass';
+export type Kind = 'peak' | 'lowshelf' | 'highshelf' | 'highpass' | 'lowpass';
 
 // Coeficientes RBJ (Audio EQ Cookbook) y magnitud en dB.
-function magDb(kind: Kind, f0: number, gainDb: number, q: number, f: number): number {
+export function magDb(kind: Kind, f0: number, gainDb: number, q: number, f: number): number {
   const A = Math.pow(10, gainDb / 40);
   const w0 = (2 * Math.PI * f0) / FS;
   const cos = Math.cos(w0);
@@ -35,6 +35,13 @@ function magDb(kind: Kind, f0: number, gainDb: number, q: number, f: number): nu
     a0 = A + 1 - (A - 1) * cos + s;
     a1 = 2 * (A - 1 - (A + 1) * cos);
     a2 = A + 1 - (A - 1) * cos - s;
+  } else if (kind === 'lowpass') {
+    b0 = (1 - cos) / 2;
+    b1 = 1 - cos;
+    b2 = (1 - cos) / 2;
+    a0 = 1 + alpha;
+    a1 = -2 * cos;
+    a2 = 1 - alpha;
   } else {
     b0 = (1 + cos) / 2;
     b1 = -(1 + cos);

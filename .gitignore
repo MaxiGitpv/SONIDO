@@ -4,3 +4,6 @@ preview*.html
 pv-*.html
 dist.html
 shot.sh
+*.mp3
+*.m4a
+*.wav
