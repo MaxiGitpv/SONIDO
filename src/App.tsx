@@ -10,6 +10,7 @@ import { FxView } from './views/FxView';
 import { ScenesView } from './views/ScenesView';
 import { RoutesView } from './views/RoutesView';
 import { PerfApp } from './perf/PerfApp';
+import { LiveApp } from './live/LiveApp';
 
 function Logo() {
   return (
@@ -27,7 +28,7 @@ function Logo() {
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, undefined, initState);
-  const [mode, setMode] = useState<'consola' | 'performance'>('consola');
+  const [mode, setMode] = useState<'live' | 'consola' | 'performance'>('live');
   const ref = useRef(state);
   ref.current = state;
   const ctx = useMemo(() => ({ state, dispatch }), [state]);
@@ -41,6 +42,7 @@ export function App() {
   }, [state.toast?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = state.scenes.find((s) => s.id === state.activeScene);
+  if (mode === 'live') return <LiveApp onLegacy={setMode} />;
   const dirty = !!active && JSON.stringify(active.data) !== JSON.stringify(state.snap);
 
   return (
@@ -48,6 +50,7 @@ export function App() {
       <div className="app">
         <header className="topbar">
           <Logo />
+          <button className="modebtn back" onClick={() => setMode('live')}>← SONIDO Live</button>
           <div className="modes" role="tablist" aria-label="Modo">
             <button role="tab" aria-selected={mode === 'consola'} className={`modebtn${mode === 'consola' ? ' on' : ''}`} onClick={() => setMode('consola')}>Consola</button>
             <button role="tab" aria-selected={mode === 'performance'} className={`modebtn${mode === 'performance' ? ' on' : ''}`} onClick={() => setMode('performance')}>Performance</button>

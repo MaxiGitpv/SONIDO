@@ -3,3 +3,4 @@ node_modules/
 preview*.html
 pv-*.html
 dist.html
+shot.sh

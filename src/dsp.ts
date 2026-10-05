@@ -57,7 +57,7 @@ function magDb(kind: Kind, f0: number, gainDb: number, q: number, f: number): nu
 
 export const BAND_KINDS: Kind[] = ['lowshelf', 'peak', 'peak', 'highshelf'];
 
-export function bandResponse(ch: Channel, f: number, includeHpf = true): number {
+export function bandResponse(ch: Pick<Channel, 'hpf' | 'eqOn' | 'eq'>, f: number, includeHpf = true): number {
   let db = 0;
   if (includeHpf && ch.hpf.on) db += magDb('highpass', ch.hpf.freq, 0, 0.7071, f);
   if (ch.eqOn) {
