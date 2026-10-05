@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { LiveCtx, Icon } from './ctx';
-import type { LiveCtxValue } from './ctx';
+import type { LiveCtxValue, MidiState, RecState } from './ctx';
+import { connectMidi as openMidi, describe } from './midi';
+import type { MidiMsg } from './midi';
+import { posToDb } from '../util';
 import { liveInit, liveReducer } from './store';
 import { CH_META, KEY_SEMI } from './data';
 import type { ChId, InId, InputCfg, SceneId, Tab } from './types';
-import { IN_IDS } from './types';
+import { IN_IDS, SCENES } from './types';
 import { engine } from './engine';
 import { Repertoire, SoundBank } from './Left';
 import { ChannelFx, PlayPanel, SceneBar, SongHeader } from './Center';
@@ -115,11 +118,11 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
   }, []);
 
   // Notas: cada capa suena en su zona (todo, izquierda o derecha del split).
-  const down = useCallback((n: number) => {
+  const down = useCallback((n: number, vel = 0.85) => {
     if (rel.current.has(n)) return;
     const { s: st, mix: m } = ref.current;
     const ids = m.layers.filter((l) => l.zone === 'all' || (l.zone === 'low' ? n < st.split : n >= st.split)).map((l) => l.ch);
-    rel.current.set(n, engine.noteOn(ids.length ? ids : [m.layers[0].ch], n + st.transpose));
+    rel.current.set(n, engine.noteOn(ids.length ? ids : [m.layers[0].ch], n + st.transpose, vel));
     setAudioOn(true);
     setHeld((h) => [...h, n]);
   }, []);
@@ -173,7 +176,89 @@ export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance')
     };
   }, [down, up]);
 
-  const ctx = useMemo<LiveCtxValue>(() => ({ s, d, mix, audioOn, loadFile, goScene }), [s, mix, audioOn, loadFile, goScene]);
+  // ---------- MIDI real ----------
+  const [midi, setMidi] = useState<MidiState>({ status: 'off', devices: [], last: '', learn: null, error: '' });
+  const learnRef = useRef<string | null>(null);
+  const ccPrev = useRef(new Map<string, number>());
+  const onMidi = useCallback((m: MidiMsg) => {
+    const st = ref.current.s;
+    setMidi((x) => ({ ...x, last: describe(m) }));
+    if (m.kind === 'on') return down(m.note, Math.max(0.15, m.vel));
+    if (m.kind === 'off') return up(m.note);
+    if (m.kind === 'pc') {
+      const sc = SCENES[m.program % SCENES.length];
+      return goScene(sc.id);
+    }
+    // CC: modo aprender
+    if (learnRef.current) {
+      const id = learnRef.current;
+      learnRef.current = null;
+      setMidi((x) => ({ ...x, learn: null }));
+      d({ type: 'midi', id, patch: { cc: m.cc, ch: m.ch } });
+      d({ type: 'toast', text: `Asignado: CC ${m.cc}, canal ${m.ch}` });
+      return;
+    }
+    const map = st.midi.find((x) => x.cc === m.cc && x.ch === m.ch);
+    if (!map) return;
+    const v = m.value / 127;
+    const prev = ccPrev.current.get(map.id) ?? 0;
+    ccPrev.current.set(map.id, m.value);
+    const rising = m.value >= 64 && prev < 64;
+    switch (map.id) {
+      case 'ambience': case 'brightness': case 'expression':
+        d({ type: 'macro', key: map.id, value: v });
+        break;
+      case 'master': d({ type: 'master', db: Math.round(posToDb(v * 0.88) * 2) / 2 }); break;
+      case 'sustain': if ((m.value >= 64) !== st.sustain) d({ type: 'sustain', on: m.value >= 64 }); break;
+      case 'prev': if (rising) d({ type: 'step', dir: -1 }); break;
+      case 'next': if (rising) d({ type: 'step', dir: 1 }); break;
+      case 'play': if (rising) { if (engine.playing) engine.pause(); else engine.play(); } break;
+      case 'panic': if (rising) engine.panic(); break;
+    }
+  }, [down, up, goScene]);
+  const onMidiRef = useRef(onMidi);
+  onMidiRef.current = onMidi;
+  const connectMidi = useCallback(() => {
+    engine.ensure();
+    openMidi((m) => onMidiRef.current(m), (devices) => setMidi((x) => ({ ...x, devices })))
+      .then((devices) => setMidi((x) => ({ ...x, status: 'on', devices, error: devices.length ? '' : 'Acceso MIDI listo, pero no hay ningún teclado o controlador conectado. Conéctelo por USB; aparecerá aquí.' })))
+      .catch((e: unknown) => {
+        const n = e instanceof Error ? (e.message === 'unsupported' ? 'unsupported' : e.name) : '';
+        setMidi((x) => ({ ...x, status: 'error', error: n === 'unsupported' ? 'Este navegador no tiene MIDI. Use Chrome o Edge en computador.' : 'El navegador no dio permiso para MIDI. Si está en el visor de Claude, abra la versión de GitHub Pages.' }));
+      });
+  }, []);
+  const setLearn = useCallback((id: string | null) => {
+    learnRef.current = id;
+    setMidi((x) => ({ ...x, learn: id }));
+  }, []);
+
+  // ---------- Grabación ----------
+  const [rec, setRec] = useState<RecState>({ on: false, secs: 0, url: null, ext: 'webm' });
+  useEffect(() => {
+    if (!rec.on) return;
+    const t0 = Date.now() - rec.secs * 1000;
+    const id = window.setInterval(() => setRec((r) => ({ ...r, secs: Math.floor((Date.now() - t0) / 1000) })), 500);
+    return () => window.clearInterval(id);
+  }, [rec.on]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleRec = useCallback(() => {
+    if (!rec.on) {
+      try {
+        const ext = engine.startRec();
+        if (rec.url) URL.revokeObjectURL(rec.url);
+        setRec({ on: true, secs: 0, url: null, ext });
+        d({ type: 'toast', text: 'Grabando el master' });
+      } catch {
+        d({ type: 'toast', text: 'Este navegador no puede grabar audio.' });
+      }
+      return;
+    }
+    void engine.stopRec().then((blob) => {
+      setRec((r) => ({ ...r, on: false, url: blob.size ? URL.createObjectURL(blob) : null }));
+      d({ type: 'toast', text: blob.size ? 'Grabación lista para escuchar o descargar' : 'La grabación quedó vacía' });
+    });
+  }, [rec.on, rec.url]);
+
+  const ctx = useMemo<LiveCtxValue>(() => ({ s, d, mix, audioOn, loadFile, goScene, midi, connectMidi, setLearn, rec, toggleRec }), [s, mix, audioOn, loadFile, goScene, midi, connectMidi, setLearn, rec, toggleRec]);
   const sr = engine.sampleRate;
   const lat = engine.latencySamples;
   const left = (

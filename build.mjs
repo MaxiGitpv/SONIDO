@@ -34,5 +34,5 @@ lv('pv-live.html', "");
 lv('pv-play.html', "document.querySelector('.tp.play').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));document.querySelector('.tp.play').click()");
 lv('pv-pads.html', "setTimeout(()=>{[...document.querySelectorAll('.segx.sm button')].find(b=>b.textContent.includes('Cuadros')).click()},100)");
 lv('pv-ed.html', "setTimeout(()=>{document.querySelector('.cfx-open').click()},100)");
-for (const t of ['Escenas', 'Tocar', 'Canal', 'Efectos', 'Entradas', 'Mezcla']) lv(`pv-t-${t}.html`, `[...document.querySelectorAll('.ltabs button')].find(b=>b.textContent==='${t}').click()`);
+for (const t of ['Escenas', 'Tocar', 'Canal', 'Efectos', 'Entradas', 'Mezcla', 'MIDI']) lv(`pv-t-${t}.html`, `[...document.querySelectorAll('.ltabs button')].find(b=>b.textContent==='${t}').click()`);
 lv('pv-tab.html', "[...document.querySelectorAll('.ltabs button')].find(b=>b.textContent==='Sonidos').click()");

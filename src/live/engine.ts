@@ -101,6 +101,9 @@ class Engine {
   private files: Partial<Record<ChId, { buf: AudioBuffer; src: AudioBufferSourceNode | null; offset: number; start: number }>> = {};
   private drone: Handle[] = [];
   private last: ApplyInput | null = null;
+  private recDest: MediaStreamAudioDestinationNode | null = null;
+  private recorder: MediaRecorder | null = null;
+  private chunks: Blob[] = [];
   private streams = new Map<string, { src: MediaStreamAudioSourceNode; split: ChannelSplitterNode; mono: GainNode }>();
   private inNodes = {} as Record<InId, { trim: GainNode; pol: GainNode; an: AnalyserNode; from: AudioNode | null }>;
   private pendingInputs: Partial<Record<InId, InputCfg>> = {};
@@ -139,6 +142,8 @@ class Engine {
     this.masterIn.connect(this.bright).connect(this.masterGain).connect(limiter).connect(c.destination);
     const split = c.createChannelSplitter(2);
     limiter.connect(split);
+    this.recDest = c.createMediaStreamDestination();
+    limiter.connect(this.recDest);
     this.anL = c.createAnalyser();
     this.anR = c.createAnalyser();
     this.anL.fftSize = this.anR.fftSize = 1024;
@@ -896,6 +901,30 @@ class Engine {
       /* ya detenido */
     }
     f.src = null;
+  }
+
+  /* ---------- Grabación del master ---------- */
+
+  startRec(): string {
+    this.ensure();
+    if (!this.recDest || typeof MediaRecorder === 'undefined') throw new Error('unsupported');
+    const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+    const mime = types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    this.chunks = [];
+    this.recorder = new MediaRecorder(this.recDest.stream, mime ? { mimeType: mime, audioBitsPerSecond: 192000 } : undefined);
+    this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
+    this.recorder.start(500);
+    return mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
+  }
+
+  stopRec(): Promise<Blob> {
+    return new Promise((resolve) => {
+      const r = this.recorder;
+      if (!r) return resolve(new Blob());
+      r.onstop = () => resolve(new Blob(this.chunks, { type: r.mimeType || 'audio/webm' }));
+      r.stop();
+      this.recorder = null;
+    });
   }
 
   /* ---------- Medición ---------- */

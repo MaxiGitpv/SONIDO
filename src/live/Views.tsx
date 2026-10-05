@@ -162,7 +162,7 @@ export function RoutesView() {
 }
 
 export function MidiView() {
-  const { s, d } = useLive();
+  const { s, d, midi, connectMidi, setLearn } = useLive();
   const step = (id: string, key: 'cc' | 'ch', v: number, min: number, max: number) => (
     <span className="stepper2">
       <button aria-label="Menos" disabled={v <= min} onClick={() => d({ type: 'midi', id, patch: { [key]: v - 1 } })}>−</button>
@@ -170,15 +170,41 @@ export function MidiView() {
       <button aria-label="Más" disabled={v >= max} onClick={() => d({ type: 'midi', id, patch: { [key]: v + 1 } })}>+</button>
     </span>
   );
+  const on = midi.status === 'on';
   return (
     <div className="mpage">
-      <ModuleHead title="MIDI" desc="Asignaciones guardadas. No hay ningún controlador MIDI conectado: hoy se usa el teclado en pantalla o el del computador (teclas A a L)." />
+      <ModuleHead title="MIDI" desc="Conecte su teclado o controlador por USB. Las notas tocan el sonido de la escena con su velocidad; el pedal, las perillas y los botones se asignan abajo.">
+        <button className={`savebtn small${on ? ' ok' : ''}`} onClick={connectMidi}>
+          <Icon name="keys" /> {on ? `MIDI activo · ${midi.devices.length} dispositivo${midi.devices.length === 1 ? '' : 's'}` : 'Conectar teclado MIDI'}
+        </button>
+      </ModuleHead>
+      {midi.error && <p className={midi.status === 'error' ? 'inerr' : 'inwarn'} role="status">{midi.error}</p>}
+      <div className="midi-top">
+        <section className="ced-card">
+          <h3>Dispositivos</h3>
+          {midi.devices.length ? (
+            <ul className="mdev">
+              {midi.devices.map((dv) => <li key={dv.id}><i className={dv.state === 'connected' ? 'ok' : ''} /> {dv.name}</li>)}
+            </ul>
+          ) : (
+            <p className="hint2">{on ? 'Ningún dispositivo conectado todavía.' : 'Pulse «Conectar teclado MIDI» y acepte el permiso del navegador.'}</p>
+          )}
+        </section>
+        <section className="ced-card">
+          <h3>Último mensaje</h3>
+          <p className="mlast">{midi.last || '—'}</p>
+          <p className="hint2">Program Change 1 a 5 cambia a Intro, Verso, Coro, Puente y Final (al compás si está sonando).</p>
+        </section>
+      </div>
       <div className="midi2">
         {s.midi.map((m) => (
-          <div key={m.id} className="midi2-row">
+          <div key={m.id} className={`midi2-row${midi.learn === m.id ? ' learning' : ''}`}>
             <b>{m.label}</b>
             {step(m.id, 'cc', m.cc, 0, 127)}
             {step(m.id, 'ch', m.ch, 1, 16)}
+            <button className={`mini${midi.learn === m.id ? ' on' : ''}`} disabled={!on} onClick={() => setLearn(midi.learn === m.id ? null : m.id)}>
+              {midi.learn === m.id ? 'Mueva un control…' : 'Aprender'}
+            </button>
           </div>
         ))}
       </div>

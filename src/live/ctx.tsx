@@ -2,6 +2,21 @@ import { createContext, useContext } from 'react';
 import type { Dispatch, ReactNode } from 'react';
 import type { ChId, LiveState, SceneId, SceneMix } from './types';
 import type { LAction } from './store';
+import type { MidiDevice } from './midi';
+
+export interface MidiState {
+  status: 'off' | 'on' | 'error';
+  devices: MidiDevice[];
+  last: string;
+  learn: string | null;
+  error: string;
+}
+export interface RecState {
+  on: boolean;
+  secs: number;
+  url: string | null;
+  ext: string;
+}
 
 export interface LiveCtxValue {
   s: LiveState;
@@ -12,6 +27,11 @@ export interface LiveCtxValue {
   loadFile: (ch: ChId, file: File) => Promise<void>;
   /** Cambia de escena: al instante si está detenido, al compás siguiente si suena. */
   goScene: (scene: SceneId) => void;
+  midi: MidiState;
+  connectMidi: () => void;
+  setLearn: (id: string | null) => void;
+  rec: RecState;
+  toggleRec: () => void;
 }
 export const LiveCtx = createContext<LiveCtxValue | null>(null);
 export function useLive() {
