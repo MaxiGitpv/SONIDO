@@ -98,9 +98,14 @@ export interface SectionDef {
   label: string;
   kind: SectionKind;
 }
+/** Un paso del orden de la canción. Con marcadores, `at` es dónde empieza esa sección en el audio del proyecto. */
 export interface Section {
   scene: SceneId;
   bars: number;
+  /** Segundos en el proyecto multitrack donde empieza este paso (solo si hay marcadores). */
+  at?: number;
+  /** Marcador del que sale este paso. */
+  marker?: string;
 }
 export type EndAction = 'stop' | 'loop' | 'next';
 export type TimeSig = '2/4' | '3/4' | '4/4' | '5/4' | '6/4' | '6/8' | '7/8' | '9/8' | '12/8';
@@ -159,6 +164,7 @@ export const STEM_CATS: { id: StemCat; label: string }[] = [
   { id: 'guia', label: 'Guía' },
   { id: 'otro', label: 'Otro' },
 ];
+/** Formato anterior (C1–C5): un archivo por stem. Solo se lee para migrar al proyecto multitrack. */
 export interface Stem {
   id: string;
   name: string;
@@ -168,6 +174,80 @@ export interface Stem {
   mute: boolean;
   offset: number; // segundos: dónde empieza respecto al compás 1
   duration: number;
+}
+
+/* ---------- Estudio multitrack (C6) ---------- */
+
+/** Ruta lógica real del motor: «Pistas» llega a la sala por su canal de consola; «Click» solo a monitores y escucha. */
+export type TrackRoute = 'tracks' | 'click';
+export interface Track {
+  id: string;
+  name: string;
+  cat: StemCat;
+  color: string;
+  route: TrackRoute;
+  /** Nivel musical de la pista (no es el fader del sonidista). */
+  db: number;
+  pan: number; // −100..100
+  mute: boolean;
+  /** Escucha previa (PFL) de la pista: va a la escucha del operador, nunca a la sala. */
+  solo: boolean;
+}
+/**
+ * Clip: un tramo de un archivo colocado en el tiempo del proyecto. Edición no destructiva:
+ * `pos` es dónde suena en el proyecto, `off` desde dónde se lee el archivo y `len` cuánto dura.
+ */
+export interface Clip {
+  id: string;
+  track: string;
+  asset: string;
+  pos: number;
+  off: number;
+  len: number;
+  gain: number; // dB
+  fadeIn: number; // s
+  fadeOut: number; // s
+  /** Grupo de alineación (stems de una misma exportación): se mueven y cortan juntos. */
+  group?: string;
+}
+/** Marcador de sección sobre el audio real. */
+export interface Marker {
+  id: string;
+  at: number;
+  sec: SceneId;
+}
+/** Datos del archivo decodificado, para avisar de faltantes y comprobar integridad al reabrir. */
+export interface AssetInfo {
+  name: string;
+  duration: number;
+  channels: number;
+  sampleRate: number;
+  bytes: number;
+  /** Versión procesada (tempo/tono) de otro archivo; el original se conserva. */
+  from?: { asset: string; rate: number; semitones: number };
+}
+/** Versión procesada vigente del proyecto y de dónde se partió (para volver al original). */
+export interface ProjVersion {
+  rate: number;
+  semitones: number;
+  baseBpm: number;
+  baseKey: string;
+}
+export interface Project {
+  v: 1;
+  tracks: Track[];
+  clips: Clip[];
+  markers: Marker[];
+  assets: Record<string, AssetInfo>;
+  /** Región A/B para practicar (segundos). */
+  loop: { on: boolean; a: number; b: number };
+  snap: boolean;
+  /** Vínculo explícito con el acompañamiento sintetizado (batería, bajo, pads…). Apagado = solo el audio del proyecto. */
+  accomp: boolean;
+  /** Compases de cuenta (solo click) antes de empezar. */
+  countIn: number;
+  /** Tempo/tono procesados (copias renderizadas); ausente = audio original. */
+  version?: ProjVersion;
 }
 
 export interface Song {
@@ -180,8 +260,10 @@ export interface Song {
   sections: SectionDef[];
   arr: Section[];
   end: EndAction;
-  stems: Stem[];
-  stemsOnly: boolean; // al usar pistas, silencia la parte sintetizada
+  project: Project;
+  /** Solo en datos anteriores a C6; `normalize` los convierte en `project`. */
+  stems?: Stem[];
+  stemsOnly?: boolean;
 }
 
 /* ---------- Sampler ---------- */

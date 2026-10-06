@@ -6,6 +6,8 @@ El selector del encabezado cambia la vista: **Todo**, **Sonidista** o **Director
 
 ## Para el sonidista
 
+- **Pistas del multitrack**: llegan a la consola por el canal «Pistas» (sala) o «Click» (solo monitores y escucha). El nivel de cada pista en Multitrack es la etapa musical; el fader «Pistas» sigue siendo del sonidista y no cambia al editar clips. Si la interfaz tiene una sola salida estéreo, todas las pistas llegan sumadas a la mesa.
+
 - **Mezcla**: canales con fader, mute, solo (escucha PFL, no silencia la sala), pan, EQ básico y medidor. Doble toque o «Editor» abre el canal completo: HPF/LPF, EQ de 6 bandas, compresor, envíos a monitores PRE/POST, presets (incluye voces y «Predicación clara») y comparación A/B.
 - **Entradas**: asignar micrófono o interfaz a `in1…in6`; muestra canales efectivos y si dos canales comparten la misma fuente.
 - **Buses**: monitores m1–m3 (renombrables, con color); tabla de envíos PRE/POST.
@@ -19,7 +21,10 @@ El selector del encabezado cambia la vista: **Todo**, **Sonidista** o **Director
 - **Escenas y repertorio**: canciones con tono, BPM, compás (2/4 a 12/8), estilo y **estructura libre**: crear secciones propias (intro, verso, pre‑coro, coro, puente, interludio, tag, final…), ordenarlas y repetirlas.
 - **Cambio de sección** al siguiente compás; Program Change del teclado selecciona la sección por número.
 - **Sonidos y capas** por sección (piano, pad, órgano, cuerdas, metales, sampler), con nivel musical y macros (ambiente, brillo, expresión). Nada de esto mueve faders de la consola.
-- **Stems**: importar varias pistas, categoría, nivel, mute, desplazamiento; «solo stems» desactiva los ritmos sintetizados.
+- **Multitrack (estudio)**: dos vistas sobre el mismo transporte que Inicio.
+  - *Preparar*: importar los stems (los de una misma importación quedan en un grupo de alineación), ver sus formas de onda reales, mover, recortar, dividir (S), duplicar (Ctrl+D), eliminar (Supr), deshacer/rehacer (Ctrl+Z/Y), fundidos (cuadritos superiores del clip), ganancia de clip, rejilla (Alt = movimiento fino), zoom (Ctrl+rueda), marcadores de sección (M) sobre el audio, orden en vivo con repeticiones, bucle A/B (Mayús + arrastrar en la regla), cuenta de 1–2 compases, preescucha por la escucha del operador y «Tempo y tono (procesado)».
+  - *En vivo*: sección actual y siguiente, tiempo restante, reproducir/pausa, detener pistas, siguiente sección, repetir/salir del loop, ir al final e iniciar desde cualquier sección. Avisa si falta algún archivo antes de empezar.
+  - «Acompañamiento sintetizado» es un vínculo explícito: apagado, solo suena el audio del proyecto (y el click). Lo que se toca en vivo con el teclado nunca se silencia por esto.
 - **Sampler**: zonas con nota raíz, rango, capas de velocidad, loop y envolvente, a partir de WAV propios.
 - **Escucha del click**: el botón «Click en escucha» lo pone en el bus de escucha, nunca en la sala.
 
@@ -35,10 +40,11 @@ El selector del encabezado cambia la vista: **Todo**, **Sonidista** o **Director
 |---|---|---|
 | 2 | `sonido.live.v2` | Consola mezclada dentro de cada escena musical |
 | 3 | `sonido.p.<perfil>.v3` | Escenas musicales y consola separadas; buses, salidas, escenas de mezcla, perfiles |
+| 4 | `sonido.p.<perfil>.v4` | Proyecto multitrack por canción (pistas, clips, marcadores, versión procesada). Al abrir datos v3, los stems pasan a pistas y clips y la copia v3 queda intacta |
 
 Al abrir por primera vez con datos v2: la consola se toma de la escena abierta, las capas pasan a niveles musicales, y se guarda una copia en `sonido.live.v2.backup` sin borrar el original.
 
 ## Recuperación
 
-- Antes de integrar se creó la etiqueta `respaldo-antes-integracion` en el repositorio. Para volver a esa versión: `git checkout respaldo-antes-integracion`.
+- Etiquetas de recuperación: `respaldo-antes-integracion` (antes de C1) y `respaldo-antes-c6` (antes de C6). Para volver: `git checkout <etiqueta>`.
 - Las versiones anteriores (Consola de 12 canales y Performance) siguen disponibles desde el menú de perfil → «Versiones anteriores».

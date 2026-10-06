@@ -20,38 +20,62 @@ interface Props {
 export function Fader({ value, onChange, disabled, label, color, meterKey, stereo, ticks = true }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
-  const grab = useRef<number | null>(null);
-
-  const posAt = (y: number, off: number) => {
+  
+  // Arrastre relativo: tocar el carril no hace saltar el nivel; el fader se mueve con el dedo desde donde estaba.
+  // Mayús/Ctrl (o mantener dos dedos fuera) da movimiento fino ×0,25. Doble clic/toque vuelve a 0 dB.
+  const drag = useRef<{ y: number; pos: number; moved: boolean } | null>(null);
+  const pending = useRef(false);
+  const span = () => {
     const r = trackRef.current!.getBoundingClientRect();
-    const th = thumbRef.current!.offsetHeight;
-    return 1 - (y - off - r.top - th / 2) / (r.height - th);
+    return Math.max(1, r.height - thumbRef.current!.offsetHeight);
+  };
+  // Último valor emitido: varias teclas seguidas no deben partir de un valor viejo antes del siguiente render.
+  const cur = useRef(value);
+  cur.current = drag.current || pending.current ? cur.current : value;
+  const emit = (db: number) => {
+    const v = Math.round(clamp(db, -90, 10) * 10) / 10;
+    cur.current = v;
+    pending.current = true;
+    queueMicrotask(() => (pending.current = false));
+    onChange(v);
   };
 
   const down = (e: React.PointerEvent) => {
-    if (disabled) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const tr = thumbRef.current!.getBoundingClientRect();
-    const cy = tr.top + tr.height / 2;
-    grab.current = Math.abs(e.clientY - cy) <= tr.height / 2 ? e.clientY - cy : 0;
-    onChange(Math.round(posToDb(posAt(e.clientY, grab.current)) * 10) / 10);
+    if (disabled || e.button > 0) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* puntero sintético o ya liberado */
+    }
+    drag.current = { y: e.clientY, pos: dbToPos(cur.current), moved: false };
   };
   const move = (e: React.PointerEvent) => {
-    if (grab.current === null) return;
-    let db = posToDb(posAt(e.clientY, grab.current));
-    if (Math.abs(db) < 1.2) db = 0; // imán en 0 dB
-    onChange(Math.round(db * 10) / 10);
+    const g = drag.current;
+    if (!g) return;
+    const fine = e.shiftKey || e.ctrlKey || e.metaKey ? 0.25 : 1;
+    const dy = (g.y - e.clientY) * fine;
+    if (!g.moved && Math.abs(g.y - e.clientY) < 3) return; // tolerancia: un toque no cambia nada
+    g.moved = true;
+    g.y = e.clientY;
+    g.pos = clamp(g.pos + dy / span(), 0, 1);
+    let db = posToDb(g.pos);
+    if (Math.abs(db) < 0.35 && fine === 1) db = 0; // imán suave en 0 dB
+    emit(db);
   };
   const up = () => {
-    grab.current = null;
+    drag.current = null;
   };
   const key = (e: React.KeyboardEvent) => {
     if (disabled) return;
-    const step = e.shiftKey ? 0.5 : 1;
-    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') onChange(clamp(value <= -89.5 ? -60 : value + step, -90, 10));
-    else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') onChange(value <= -59 ? -90 : value - step);
-    else if (e.key === 'Home') onChange(10);
-    else if (e.key === 'End') onChange(-90);
+    const v = cur.current;
+    const step = e.shiftKey ? 0.1 : e.ctrlKey || e.metaKey ? 3 : 0.5;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') emit(v <= -89.5 ? -60 : v + step);
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') emit(v <= -60 ? -90 : v - step);
+    else if (e.key === 'PageUp') emit(v <= -89.5 ? -40 : v + 6);
+    else if (e.key === 'PageDown') emit(v - 6 < -60 ? -90 : v - 6);
+    else if (e.key === 'Home') emit(10);
+    else if (e.key === 'End') emit(-90);
+    else if (e.key === '0') emit(0);
     else return;
     e.preventDefault();
   };
@@ -80,6 +104,7 @@ export function Fader({ value, onChange, disabled, label, color, meterKey, stere
         aria-valuemin={-90}
         aria-valuemax={10}
         aria-valuenow={Math.round(value * 10) / 10}
+        aria-valuetext={value <= -89.5 ? 'menos infinito' : `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`}
         aria-disabled={disabled}
         onPointerDown={down}
         onPointerMove={move}
@@ -87,6 +112,7 @@ export function Fader({ value, onChange, disabled, label, color, meterKey, stere
         onPointerCancel={up}
         onKeyDown={key}
         onDoubleClick={() => !disabled && onChange(0)}
+        title={disabled ? undefined : 'Arrastrar: nivel · Mayús: fino · Doble clic: 0 dB'}
       >
         <div className="fader-rail" />
         {ticks && FADER_TICKS.map((t) => <i key={t} className={`tick${t === 0 ? ' zero' : ''}`} style={{ bottom: at(dbToPos(t)) }} />)}

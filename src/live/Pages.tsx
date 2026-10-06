@@ -1,3 +1,4 @@
+import { envCaps, whyNot } from './env';
 import { useEffect, useRef, useState } from 'react';
 import { useLive, Icon } from './ctx';
 import { ModuleHead } from './nav';
@@ -182,7 +183,10 @@ export function InputsPage() {
   const [status, setStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [err, setErr] = useState('');
 
+  const caps = envCaps();
   const enable = async () => {
+    // Sin captura posible (control remoto o dirección no segura) no se piden permisos: el aviso fijo ya lo explica.
+    if (remote || !caps.capture) return;
     engine.ensure();
     try {
       const list = await engine.inputDevices(true);
@@ -200,6 +204,7 @@ export function InputsPage() {
   };
   useEffect(() => {
     // Si ya hay permiso de una visita anterior, la lista llega sin preguntar.
+    if (remote || !caps.capture) return;
     engine.inputDevices(false).then((l) => {
       if (l.some((x) => x.label)) {
         setDevices(l);
@@ -216,6 +221,7 @@ export function InputsPage() {
           <Icon name="voz" /> {status === 'ok' ? `Entradas activas · ${devices.length}` : 'Activar entradas de audio'}
         </button>
       </ModuleHead>
+      {(remote || !caps.capture) && <p className="inwarn">{remote ? 'Este dispositivo es un control remoto: las entradas y el audio son los del equipo anfitrión.' : whyNot(caps, 'capture')}</p>}
       {status === 'error' && <p className="inerr" role="alert">{err}</p>}
       <p className="inwarn"><b>Evite el acople:</b> use audífonos o mantenga bajo el volumen de los parlantes al abrir un micrófono. Las entradas empiezan silenciadas (M). El +48V de los micrófonos de condensador se activa en la interfaz física; el navegador no puede controlarlo.</p>
       <div className="intable">

@@ -20,7 +20,16 @@ export interface RecState {
   ext: string;
   mime: string;
 }
-export type AssetState = Record<string, 'loading' | 'ready' | 'missing' | 'error'>;
+/** 'session': decodificado y sonando, pero no se pudo guardar en el navegador (cuota). */
+export type AssetState = Record<string, 'loading' | 'ready' | 'session' | 'missing' | 'error'>;
+/** Órdenes del transporte único. `arg`: segundos (seek) o índice del orden (from, jump). */
+export type TransportOp = 'play' | 'pause' | 'toggle' | 'stop' | 'seek' | 'from' | 'jump' | 'end';
+export interface TransportNow {
+  playing: boolean;
+  pos: number;
+  sec: number;
+  pending: number | null;
+}
 export interface NetState {
   status: NetStatus;
   detail: string;
@@ -59,7 +68,9 @@ export interface LiveCtxValue {
   addSamples: (files: File[]) => Promise<void>;
   netState: NetState;
   setNetState: Dispatch<SetStateAction<NetState>>;
-  transport: (op: 'play' | 'pause' | 'stop') => void;
+  transport: (op: TransportOp, arg?: number) => void;
+  /** Posición actual del transporte: del motor local o, en una tablet, la del anfitrión extrapolada. */
+  tpNow: () => TransportNow;
   panic: () => void;
   save: () => void;
   profile: string;

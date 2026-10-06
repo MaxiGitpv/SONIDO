@@ -19,11 +19,15 @@ const js = await build({
 });
 const css = await build({ entryPoints: ['src/styles.css'], bundle: true, minify: true, write: false });
 
+// Signalsmith Stretch (MIT): se incluye sin minificar porque genera su AudioWorklet desde su propio código fuente.
+const stretchLib = readFileSync('node_modules/signalsmith-stretch/SignalsmithStretch.js', 'utf8').replace(/<\/script/gi, '<\\/script');
 const html = `<title>SONIDO</title>
 <meta name="sonido-build" content="${BUILD}">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>${css.outputFiles[0].text}</style>
 <div id="root"></div>
+<!-- Signalsmith Stretch 1.3.2 · Copyright (c) Signalsmith Audio · Licencia MIT · https://github.com/Signalsmith-Audio/signalsmith-stretch -->
+<script>${stretchLib}</script>
 <script>${js.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>
 `;
 writeFileSync('dist.html', html);

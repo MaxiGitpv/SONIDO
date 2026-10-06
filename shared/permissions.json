@@ -5,7 +5,7 @@
     "music": "music", "macro": "music", "drawbar": "music", "split": "music", "transpose": "music", "octave": "music", "sustain": "music", "playMode": "music",
     "src": "music", "file": "music", "songEdit": "music", "style": "music", "bars": "music", "end": "music", "songAdd": "music",
     "secAdd": "music", "secEdit": "music", "secRemove": "music", "arrAdd": "music", "arrRemove": "music", "arrMove": "music", "arrScene": "music",
-    "stemAdd": "music", "stemEdit": "music", "stemRemove": "music", "stemsOnly": "music",
+    "proj": "music", "projUndo": "music", "projRedo": "music",
     "zoneAdd": "music", "zoneEdit": "music", "zoneRemove": "music", "samplerEdit": "music",
     "midi": "midi",
     "ch": "console", "chput": "console", "preset": "console", "clearSolo": "console",

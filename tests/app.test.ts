@@ -8,6 +8,7 @@ import { liveInit, liveReducer } from '../src/live/store';
 import type { LState } from '../src/live/store';
 import { defaults, exportFile, importFile, migrateV2, normalize } from '../src/live/persist';
 import { CH_IDS } from '../src/live/types';
+import { dbToPos, faderGain, posToDb } from '../src/util';
 
 const fresh = (): LState => liveInit(defaults());
 
@@ -119,14 +120,11 @@ test('migración del esquema 2: consola desde la escena abierta, arreglo como ni
   for (const id of CH_IDS) assert.ok(d.console[id], `canal ${id}`);
 });
 
-test('exportar e importar conserva la sesión y lista los audios faltantes', () => {
+test('exportar e importar conserva la sesión y no lleva dispositivos', () => {
   let s = fresh();
   s = liveReducer(s, { type: 'songEdit', id: s.songId, patch: { title: 'Exportada' } });
-  s = liveReducer(s, { type: 'stemAdd', stem: { id: 'st1', name: 'Batería', cat: 'bateria', asset: 'a1', db: 0, mute: false, offset: 0, duration: 120 } });
-  const file = exportFile(s, 'Principal', []);
-  const { data, missing } = importFile(file);
+  const { data } = importFile(exportFile(s, 'Principal', []));
   assert.equal(data.songs.find((x) => x.id === s.songId)!.title, 'Exportada');
-  assert.ok(missing.some((m) => m.includes('Batería')));
   for (const id of ['in1', 'in2'] as const) assert.equal(data.inputs[id].device, null, 'los dispositivos no viajan entre equipos');
 });
 
@@ -141,4 +139,16 @@ test('escena completa: recuerda canción y sección además de la mezcla', () =>
   assert.deepEqual([s.songId, s.sceneId], [song, 'puente']);
   s = liveReducer(s, { type: 'mixSave', name: 'Solo mezcla' });
   assert.equal(s.mixScenes.find((m) => m.name === 'Solo mezcla')!.ref, undefined);
+});
+
+test('fader de SONIDO: dB ↔ posición reversible y ganancia real (sin curva de mesa)', () => {
+  for (let db = -90; db <= 10; db += 0.5) assert.ok(Math.abs(posToDb(dbToPos(db)) - db) < 1e-9, `${db} dB`);
+  assert.equal(dbToPos(-90), 0);
+  assert.equal(dbToPos(10), 1);
+  assert.equal(dbToPos(0), 0.75);
+  assert.equal(faderGain(-90), 0, '−∞ es silencio');
+  assert.equal(faderGain(0), 1);
+  assert.ok(Math.abs(faderGain(-6) - 0.501) < 1e-3);
+  // Cerca de 0 dB un paso fino de 0,1 dB mueve la posición de forma apreciable y monótona.
+  assert.ok(dbToPos(0.1) > dbToPos(0) && dbToPos(0) > dbToPos(-0.1));
 });

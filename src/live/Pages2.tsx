@@ -2,16 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLive, Icon } from './ctx';
 import { ModuleHead } from './nav';
 import { CH_META, chIcon, chName, mixDataOf } from './data';
-import { CH_IDS, STEM_CATS } from './types';
-import type { RecallMask, StemCat } from './types';
-import { engine, meter } from './engine';
+import { CH_IDS } from './types';
+import type { RecallMask } from './types';
+import { engine } from './engine';
 import { meterBus } from '../meterEngine';
 import { HSlider } from '../components/HSlider';
 import { dbToPos, fmtDb, posToDb } from '../util';
 import { net, NetClient } from './net';
 import type { Role } from './perms';
 import { ROLE_LABEL } from './perms';
-import { MIXERS, dbToFader, dbToGain, faderToDb, gainToDb, modelFromInfo } from './mixers';
+import { envCaps, whyNot } from './env';
+import { MIXERS, dbToTrim, trimToDb, x32PreampLabel, xairPreampOf, dbToFader, dbToGain, faderToDb, gainToDb, modelFromInfo } from './mixers';
 import type { MixerModel } from './mixers';
 
 const dbSlider = (label: string, v: number, on: (x: number) => void, color?: string, disabled?: boolean) => (
@@ -126,6 +127,7 @@ export function OutputsPage() {
   return (
     <div className="mpage">
       <ModuleHead title="Salidas, escucha y grabación" desc="Asigne el master, la escucha del operador y cada monitor a las salidas reales del dispositivo. Un bus lógico no es una salida física: si el dispositivo tiene un solo par, los monitores no salen por separado." />
+      {!envCaps().sink && <p className="inwarn">{whyNot(envCaps(), 'sink')}</p>}
       <div className="outgrid">
         <section className="ced-card">
           <h3>Dispositivo de salida</h3>
@@ -265,57 +267,6 @@ export function MixScenesPage() {
   );
 }
 
-/* ---------- Multitrack ---------- */
-const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-
-export function StemsPage() {
-  const { d, song, can, assets, addStems, remote } = useLive();
-  const input = useRef<HTMLInputElement>(null);
-  const edit = can('music');
-  const total = song.arr.reduce((a, x) => a + x.bars, 0) * meter(song.ts, song.bpm).bar;
-  const missing = song.stems.filter((st) => assets[st.asset] === 'missing' || assets[st.asset] === 'error');
-  const loading = song.stems.filter((st) => !assets[st.asset] || assets[st.asset] === 'loading');
-  const ready = song.stems.length > 0 && !missing.length && !loading.length;
-  return (
-    <div className="mpage">
-      <ModuleHead title={`Multitrack · ${song.title}`} desc="Varios stems de la canción que arrancan en el mismo instante del reloj de audio y siguen alineados al pausar, cambiar de sección o repetir. El click y la guía van solo a monitores.">
-        <input ref={input} type="file" accept="audio/*" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; if (f.length) void addStems(f); e.target.value = ''; }} />
-        <button className="mini on" disabled={!edit || remote} onClick={() => input.current?.click()}><Icon name="upload" size={14} /> Importar stems…</button>
-      </ModuleHead>
-      <p className={ready ? 'inok' : song.stems.length ? 'inwarn' : 'hint2'}>
-        {song.stems.length === 0 ? 'Esta canción todavía no tiene stems. Importe varios archivos a la vez (batería, bajo, teclados, guitarras, voces, ambiente, click, guía).' : ready ? `Arreglo listo: ${song.stems.length} stems cargados.` : `${missing.length ? `Faltan ${missing.length} archivos (${missing.map((x) => x.name).join(', ')}). ` : ''}${loading.length ? `Cargando ${loading.length}…` : ''}`}
-      </p>
-      <label className="chk">
-        <input type="checkbox" disabled={!edit} checked={song.stemsOnly} onChange={(e) => d({ type: 'stemsOnly', on: e.target.checked })} />
-        Usar solo las pistas en esta canción (silencia los instrumentos sintetizados; los micrófonos siguen igual)
-      </label>
-      <div className="stemlist">
-        {song.stems.map((st) => {
-          const status = assets[st.asset] ?? 'loading';
-          const short = st.duration + st.offset < total - 0.5;
-          return (
-            <div key={st.id} className={`stem-row ${status}`}>
-              <input aria-label="Nombre del stem" value={st.name} maxLength={32} disabled={!edit} onChange={(e) => d({ type: 'stemEdit', id: st.id, patch: { name: e.target.value } })} />
-              <select aria-label="Categoría" value={st.cat} disabled={!edit} onChange={(e) => d({ type: 'stemEdit', id: st.id, patch: { cat: e.target.value as StemCat } })}>
-                {STEM_CATS.map((c) => <option key={c.id} value={c.id}>{c.label}{c.id === 'click' || c.id === 'guia' ? ' (solo monitores)' : ''}</option>)}
-              </select>
-              {dbSlider(`Nivel de ${st.name}`, st.db, (v) => d({ type: 'stemEdit', id: st.id, patch: { db: v } }), undefined, !edit)}
-              <b>{fmtDb(st.db)}</b>
-              <button className={`ms m${st.mute ? ' on' : ''}`} disabled={!edit} aria-pressed={st.mute} onClick={() => d({ type: 'stemEdit', id: st.id, patch: { mute: !st.mute } })}>M</button>
-              <label className="offset">Inicio
-                <input type="number" step="0.01" value={st.offset} disabled={!edit} onChange={(e) => d({ type: 'stemEdit', id: st.id, patch: { offset: Number(e.target.value) || 0 } })} />s
-              </label>
-              <small>{mmss(st.duration)}{short ? ' · termina antes que la canción' : ''} · {status === 'ready' ? 'listo' : status === 'loading' ? 'cargando' : status === 'missing' ? 'falta el archivo' : 'error al decodificar'}</small>
-              <button className="iconbtn" aria-label={`Quitar ${st.name}`} disabled={!edit} onClick={() => d({ type: 'stemRemove', id: st.id })}><Icon name="x" size={14} /></button>
-            </div>
-          );
-        })}
-      </div>
-      <p className="hint2">Duración del arreglo: {mmss(total)} a {song.bpm} BPM. Cambiar el BPM o la tonalidad no estira ni transpone el audio grabado: solo cambia la parte sintetizada. Un stem más corto simplemente se calla al terminar.</p>
-    </div>
-  );
-}
-
 /* ---------- Red: colaboración y mesa digital ---------- */
 export function NetworkPage() {
   const { s, netState, role, remote, can } = useLive();
@@ -330,6 +281,7 @@ export function NetworkPage() {
   return (
     <div className="mpage">
       <ModuleHead title="Red: colaboración y mesa digital" desc="Para controlar desde tablets y para manejar una mesa digital por IP se usa el puente local de SONIDO en el computador anfitrión (Ethernet o Wi-Fi). Ver docs/RED-Y-MESAS.md." />
+      <CapsCard />
       {https && <p className="inwarn">Esta página se abrió por HTTPS. Desde aquí solo puede conectarse a un puente en este mismo computador (127.0.0.1). Para tablets, abra la app desde el puente: <b>http://IP-del-computador:8790</b>.</p>}
       <div className="outgrid">
         <section className="ced-card">
@@ -372,6 +324,30 @@ export function NetworkPage() {
         <MixerCard connected={connected} canControl={!remote ? can('console') : role === 'mixer' || role === 'all'} />
       </div>
     </div>
+  );
+}
+
+/** Lo que este dispositivo puede hacer de verdad, según la dirección y el navegador. */
+function CapsCard() {
+  const { remote, netState } = useLive();
+  const c = envCaps();
+  const row = (label: string, ok: boolean, why?: string | null) => (
+    <li className={ok ? 'ok' : 'no'}><b>{ok ? 'Sí' : 'No'}</b> {label}{!ok && why ? <small> — {why}</small> : null}</li>
+  );
+  return (
+    <section className="ced-card capscard">
+      <h3>Este dispositivo</h3>
+      <p className="hint2">
+        Papel: <b>{remote ? 'control remoto (no produce audio)' : netState.status === 'on' && netState.host ? 'anfitrión (produce el audio)' : 'equipo local (produce el audio)'}</b> · Dirección {c.origin} · {c.secure ? 'contexto seguro' : 'sin contexto seguro'}
+      </p>
+      <ul className="caps">
+        {row('Micrófonos e interfaz de audio', c.capture && !remote, remote ? 'en un control remoto las entradas son las del anfitrión' : whyNot(c, 'capture'))}
+        {row('Teclado MIDI', c.midi && !remote, remote ? 'el MIDI se conecta al anfitrión' : whyNot(c, 'midi'))}
+        {row('Elegir salida de audio', c.sink && !remote, remote ? 'la salida es la del anfitrión' : whyNot(c, 'sink'))}
+        {row('Controlar al anfitrión por la red', true)}
+      </ul>
+      {!c.secure && !remote && c.hostUrl && <p className="hint2">¿Este es el PC anfitrión? Ábralo como <a href={c.hostUrl}>{c.hostUrl}</a>.</p>}
+    </section>
   );
 }
 
@@ -425,23 +401,47 @@ function ExternalMixer({ canControl }: { canControl: boolean }) {
   const [send, setSend] = useState(0); // 0 = sala; 1..n = bus
   const v = netState.values;
   const chs = Array.from({ length: 8 }, (_, i) => bank * 8 + i + 1).filter((n) => n <= spec.channels);
+  // Qué preamp físico alimenta cada canal. Sin saberlo no se envían ganancia ni +48V.
+  const mapKey = `sonido.x32.preamps.${mixer.name}`;
+  const [map, setMap] = useState<Record<number, number>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(mapKey) ?? '{}') as Record<number, number>;
+    } catch {
+      return {};
+    }
+  });
+  const assign = (n: number, idx: number) => {
+    const next = { ...map, [n]: idx };
+    setMap(next);
+    try {
+      localStorage.setItem(mapKey, JSON.stringify(next));
+    } catch {
+      /* sin almacenamiento: vale para esta sesión */
+    }
+  };
+  const preampOf = (n: number): number | null =>
+    spec.preampMode === 'insrc' ? xairPreampOf(v[`${spec.ch(n)}/config/insrc`]) : (map[n] ?? -1) >= 0 ? map[n] : null;
+  const known = chs.map((n) => preampOf(n) ?? -1).join(',');
   useEffect(() => {
     const addrs: string[] = [];
     for (const n of chs) {
       const c = spec.ch(n);
       addrs.push(`${c}/config/name`, `${c}/mix/fader`, `${c}/mix/on`, `${c}/mix/pan`);
-      const h = spec.headamp(n);
-      if (h) addrs.push(`${h}/gain`, `${h}/phantom`);
+      if (spec.preampMode === 'insrc') addrs.push(`${c}/config/insrc`);
+      const p = preampOf(n);
+      if (p !== null) addrs.push(`${spec.headampAt(p)}/gain`, `${spec.headampAt(p)}/phantom`);
+      if (spec.trim) addrs.push(spec.trim(n));
       if (send > 0) addrs.push(spec.sendLevel(n, send));
     }
     addrs.push(`${spec.main}/mix/fader`, `${spec.main}/mix/on`);
     net.mixer({ op: 'get', addresses: addrs });
-  }, [bank, send, mixer.ip]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bank, send, mixer.ip, known]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (address: string, type: 'f' | 'i', value: number) => net.mixer({ op: 'set', address, type, value });
   const num = (a: string, def = 0) => (typeof v[a] === 'number' ? (v[a] as number) : def);
   return (
     <div className="xmixer">
-      <p className="hint2">Conectado a <b>{mixer.name}</b> ({mixer.model}, {mixer.ip}). Los cambios se aplican en la mesa física.</p>
+      <p className="hint2">Conectado a <b>{mixer.name}</b> ({mixer.model}, {mixer.ip}). Los cambios se aplican en la <b>mesa física</b>, no en el audio de este computador.</p>
+      <p className="xtested">{spec.tested}</p>
       <div className="gp-row">
         <div className="segx sm" role="group" aria-label="Banco">
           {Array.from({ length: Math.ceil(spec.channels / 8) }, (_, i) => <button key={i} className={bank === i ? 'on' : ''} onClick={() => setBank(i)}>{i * 8 + 1}-{Math.min(spec.channels, i * 8 + 8)}</button>)}
@@ -457,7 +457,9 @@ function ExternalMixer({ canControl }: { canControl: boolean }) {
       <div className="xstrips">
         {chs.map((n) => {
           const c = spec.ch(n);
-          const h = spec.headamp(n);
+          const pre = preampOf(n);
+          const h = pre === null ? null : spec.headampAt(pre);
+          const insrc = v[`${c}/config/insrc`];
           const lvlAddr = send > 0 ? spec.sendLevel(n, send) : `${c}/mix/fader`;
           const lvl = num(lvlAddr);
           const on = num(`${c}/mix/on`, 1) === 1;
@@ -465,13 +467,33 @@ function ExternalMixer({ canControl }: { canControl: boolean }) {
           return (
             <div key={n} className="xstrip">
               <b className="xname" title={String(v[`${c}/config/name`] ?? '')}>{String(v[`${c}/config/name`] || `Ch ${n}`)}</b>
+              {spec.preampMode === 'manual' && (
+                <label className="xg">Preamp
+                  <select aria-label={`Preamp físico del canal ${n}`} value={map[n] ?? -1} disabled={!canControl} onChange={(e) => assign(n, Number(e.target.value))}>
+                    {[-1, ...Array.from({ length: 128 }, (_, i) => i)].map((i) => <option key={i} value={i}>{x32PreampLabel(i)}</option>)}
+                  </select>
+                </label>
+              )}
+              {!h && (
+                <small className="xnote">
+                  {spec.preampMode === 'insrc'
+                    ? insrc === undefined ? 'Fuente sin leer: ganancia y +48V bloqueados' : 'Fuente sin preamp (USB/aux): sin ganancia ni +48V'
+                    : 'Asigne el preamp para ganancia y +48V'}
+                </small>
+              )}
               {h && (
                 <>
+                  {spec.preampMode === 'manual' && <small className="xnote">{x32PreampLabel(pre!)}</small>}
                   <label className="xg">Gan. {gainToDb(num(`${h}/gain`, 0.17)).toFixed(0)} dB
                     <HSlider label={`Ganancia canal ${n}`} value={gainToDb(num(`${h}/gain`, 0.17))} toPos={(x) => (x + 12) / 72} fromPos={(p) => p * 72 - 12} snap={(x) => Math.round(x * 2) / 2} disabled={!canControl} onChange={(x) => set(`${h}/gain`, 'f', dbToGain(x))} />
                   </label>
                   <button className={`mini${num(`${h}/phantom`) === 1 ? ' warn' : ''}`} disabled={!canControl} aria-pressed={num(`${h}/phantom`) === 1} onClick={() => set(`${h}/phantom`, 'i', num(`${h}/phantom`) === 1 ? 0 : 1)}>+48V {num(`${h}/phantom`) === 1 ? 'ON' : 'OFF'}</button>
                 </>
+              )}
+              {spec.trim && (
+                <label className="xg">Trim digital {fmtDb(trimToDb(num(spec.trim(n), 0.5)))}
+                  <HSlider label={`Trim digital canal ${n}`} value={trimToDb(num(spec.trim(n), 0.5))} toPos={(x) => (x + 18) / 36} fromPos={(p) => p * 36 - 18} snap={(x) => Math.round(x * 2) / 2} disabled={!canControl} onChange={(x) => set(spec.trim!(n), 'f', dbToTrim(x))} />
+                </label>
               )}
               <button className={`ms m${!on ? ' on' : ''}`} disabled={!canControl} aria-pressed={!on} onClick={() => set(`${c}/mix/on`, 'i', on ? 0 : 1)}>M</button>
               <label className="xg">{send > 0 ? `Envío bus ${send}` : 'Fader'} {fmtDb(faderToDb(lvl))}
