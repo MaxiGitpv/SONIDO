@@ -1,22 +1,41 @@
 # SONIDO
 
-Prototipo interactivo (React + TypeScript). La vista principal es **SONIDO Live Workspace**: repertorio, escenas, sonido en capas, teclado tocable, EQ/compresor/reverb/delay y canales con medidores, todo con audio real generado en el navegador (Web Audio). Incluye línea de tiempo por secciones (seguir arreglo o repetir sección, cambios al compás), ritmos con batería, bajo y percusión sintetizados (Worship, Balada, Júbilo, Funk, Salsa, Tumbao, Merengue, Samba), cuadros para tocar acordes, golpes y fondos, capas de sonido editables por zona del teclado, editor de canal con EQ de 6 bandas, filtros, presets y A/B, y carga de archivos propios para Tracks, pad de fondo y batería.
+Espacio de trabajo en vivo para el sonido de la iglesia (React + TypeScript, audio real con Web Audio). Un solo motor de audio con dos responsabilidades separadas:
 
-Desde el engranaje se abren las versiones anteriores:
+- **Sonidista**: consola con canales, EQ, compresor, buses de monitor con envíos PRE/POST, escucha PFL, salidas, escenas de mezcla con máscara y canales protegidos, y control por IP de mesas **Behringer X Air / Midas MR18** y **X32 / M32** (Ethernet o Wi‑Fi).
+- **Director de alabanza**: repertorio con estructura libre (secciones propias, repeticiones, compases 2/4 a 12/8), sonidos en capas, stems sincronizados, sampler, ritmos y teclado MIDI.
 
-- **Consola**: mezcla de iglesia con 12 canales, mezclas de monitores, EQ, compresor, envíos, escenas y rutas. Los medidores solo se mueven con el interruptor DEMO (niveles simulados).
-- **Performance**: escenas Intro, Verso, Coro, Puente y Final por canción, capas Piano/Pad/Órgano/Cuerdas, macros, teclado gráfico, vista de edición y modo prueba Verso/Coro. Motor de audio pendiente: no suena ni se conecta a equipos.
+Funciona en PC/Mac (Chrome o Edge recomendado), tabletas y teléfonos. Con mesas analógicas se usa una interfaz de audio USB; SONIDO mezcla en el computador.
 
 ## Uso rápido
 
-Abra `index.html` en cualquier navegador (archivo único, ya compilado). En línea: https://maxigitpv.github.io/SONIDO/
+- En línea (un solo equipo, sin puente): https://maxigitpv.github.io/SONIDO/
+- Sin conexión: abra `index.html` en el navegador.
+- Con tabletas y mesa digital (red local):
+
+```bash
+npm --prefix bridge install
+npm run bridge
+```
+
+Luego abra la dirección que muestra el puente en cada dispositivo. Detalles en [docs/RED-Y-MESAS.md](docs/RED-Y-MESAS.md).
+
+## Documentación
+
+- [Guía de uso](docs/GUIA-USO.md) — sonidista, director, perfiles, esquema y recuperación.
+- [Flujo de audio](docs/FLUJO-AUDIO.md) — grafo, PFL, PRE/POST, aislamiento del click.
+- [Red y mesas](docs/RED-Y-MESAS.md) — puente, roles y PIN, X Air/X32, compatibilidad, pruebas físicas.
+- [Estado](docs/ESTADO.md) — evidencia de pruebas, pendientes y después del MVP.
+- [Inventario C0](docs/INVENTARIO.md).
 
 ## Desarrollo
 
 ```bash
 npm install
-npx tsc -p .        # revisa tipos
-node build.mjs      # genera dist.html (página lista para publicar)
+npx tsc -p .              # revisa tipos
+node build.mjs            # genera index.html y dist.html (incluye commit y fecha)
+npm test                  # pruebas de la app y del puente
+npm run emulador          # X Air simulada en UDP 10024
 ```
 
-`build.mjs` genera `dist.html`; `index.html` es esa misma página envuelta en `<!doctype html><html><body>…</body></html>`.
+La versión compilada se ve en la barra de estado («Versión») y en `<meta name="sonido-build">`.

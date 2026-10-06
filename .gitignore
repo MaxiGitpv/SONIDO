@@ -7,3 +7,5 @@ shot.sh
 *.mp3
 *.m4a
 *.wav
+.tmp/
+bridge/node_modules/

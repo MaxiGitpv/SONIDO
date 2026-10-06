@@ -1,0 +1,19 @@
+{
+  "name": "sonido-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Puente local de SONIDO: app en la red local, colaboración con roles y control OSC de mesas X Air / X32.",
+  "type": "module",
+  "main": "sonido-bridge.mjs",
+  "scripts": {
+    "start": "node sonido-bridge.mjs",
+    "emulador": "node emulator-xair.mjs",
+    "test": "node --test test/bridge.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

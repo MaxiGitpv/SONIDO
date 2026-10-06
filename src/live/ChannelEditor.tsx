@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLive, Icon } from './ctx';
-import { CH_META, EQ_NAMES, chIcon, chName, presetsFor } from './data';
+import { BASIC_EQ, CH_META, EQ_NAMES, chIcon, chName, presetsFor } from './data';
 import { CH_IDS } from './types';
 import type { Chan, ChId } from './types';
 import { BAND_COLORS, BandKnobs, CompCurve, CompKnobs, EqGraph, GrMeter } from './Center';
@@ -11,8 +11,10 @@ import { clone, dbToPos, fmtDb, fmtHz, posToDb } from '../util';
 
 /** Editor completo de un canal: EQ grande con zonas, mezclas rápidas, presets, filtros, compresor y A/B. */
 export function ChannelEditor({ id }: { id: ChId }) {
-  const { s, d, mix } = useLive();
+  const { s, d, mix, can } = useLive();
   const ch = mix.chans[id];
+  const lock = !can('console');
+  const ml = mix.music[id];
   const meta = CH_META[id];
   const [sel, setSel] = useState(3);
   const [ab, setAb] = useState<{ A: Chan | null; B: Chan | null; cur: 'A' | 'B' | null }>({ A: null, B: null, cur: null });
@@ -47,7 +49,8 @@ export function ChannelEditor({ id }: { id: ChId }) {
           </div>
         </header>
 
-        <div className="ced-body">
+        {lock && <p className="inwarn ced-lock">Consola del sonidista: en esta vista puede ver el canal pero no cambiarlo.</p>}
+        <div className={`ced-body${lock ? ' locked' : ''}`}>
           <section className="ced-eq">
             <EqGraph ch={ch} id={id} sel={sel} setSel={setSel} W={900} H={300} big />
             <p className="hint2">Arrastre los puntos de color para cada banda y los cuadrados grises para los filtros pasa altos y pasa bajos. Con la rueda del ratón sobre una campana se cambia su ancho (Q).</p>
@@ -70,6 +73,31 @@ export function ChannelEditor({ id }: { id: ChId }) {
           </section>
 
           <aside className="ced-side">
+            <section className="ced-card">
+              <h3>EQ básico</h3>
+              <p className="hint2">Son las bandas Graves, Presencia y Brillo del EQ avanzado: un solo EQ, dos formas de verlo.</p>
+              <div className="beq">
+                {BASIC_EQ.map((b) => (
+                  <Knob key={b.band} label={b.label} value={ch.eq[b.band].gain} min={-15} max={15} step={0.5} def={0} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`} disabled={lock} color={BAND_COLORS[b.band]}
+                    onChange={(v) => set((c) => ({ ...c, eqOn: true, eq: c.eq.map((q, i) => (i === b.band ? { ...q, gain: v, on: true } : q)) }))} />
+                ))}
+              </div>
+            </section>
+            <section className="ced-card">
+              <h3>Envíos a monitores</h3>
+              {s.buses.map((b) => {
+                const snd = ch.aux[b.id] ?? { db: -90, pre: true };
+                return (
+                  <div key={b.id} className="auxrow" style={{ ['--cc' as string]: b.color }}>
+                    <span>{b.name}</span>
+                    <HSlider label={`Envío a ${b.name}`} value={snd.db} toPos={dbToPos} fromPos={posToDb} snap={(x) => Math.round(x * 2) / 2} color={b.color} disabled={lock} onChange={(v) => d({ type: 'aux', ch: id, bus: b.id, patch: { db: v } })} />
+                    <b>{fmtDb(snd.db)}</b>
+                    <button className={`mini${snd.pre ? ' on' : ''}`} disabled={lock} onClick={() => d({ type: 'aux', ch: id, bus: b.id, patch: { pre: !snd.pre } })} title="PRE: antes del fader de sala. POST: después.">{snd.pre ? 'PRE' : 'POST'}</button>
+                  </div>
+                );
+              })}
+              <p className="hint2">{ch.toMain ? 'Este canal va a la sala.' : 'Este canal no va a la sala: solo a monitores y escucha.'}{ml ? ` Nivel musical en esta sección (director): ${ml.on ? `${fmtDb(ml.db)} dB` : 'apagado'}.` : ''}</p>
+            </section>
             <section className="ced-card">
               <h3>Mezclas rápidas</h3>
               <div className="tone">

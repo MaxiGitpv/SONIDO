@@ -1,8 +1,10 @@
 import { createContext, useContext } from 'react';
-import type { Dispatch, ReactNode } from 'react';
-import type { ChId, LiveState, SceneId, SceneMix } from './types';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import type { ChId, LiveState, SceneId, SceneMix, Song } from './types';
 import type { LAction } from './store';
 import type { MidiDevice } from './midi';
+import type { Area, Role } from './perms';
+import type { MixerInfo, NetStatus, Peer } from './net';
 
 export interface MidiState {
   status: 'off' | 'on' | 'error';
@@ -16,6 +18,22 @@ export interface RecState {
   secs: number;
   url: string | null;
   ext: string;
+  mime: string;
+}
+export type AssetState = Record<string, 'loading' | 'ready' | 'missing' | 'error'>;
+export interface NetState {
+  status: NetStatus;
+  detail: string;
+  role: Role;
+  host: boolean;
+  hostPresent: boolean;
+  peers: Peer[];
+  ownBus: string;
+  mixers: MixerInfo[];
+  mixer: MixerInfo | null;
+  values: Record<string, number | string>;
+  meters: number[];
+  levels: Record<string, number>;
 }
 
 export interface LiveCtxValue {
@@ -23,15 +41,28 @@ export interface LiveCtxValue {
   d: Dispatch<LAction>;
   mix: SceneMix;
   audioOn: boolean;
-  /** Carga un archivo de audio en un canal (Tracks, Pad o Batería). */
   loadFile: (ch: ChId, file: File) => Promise<void>;
-  /** Cambia de escena: al instante si está detenido, al compás siguiente si suena. */
+  /** Cambia de sección: al instante si está detenido, en el compás siguiente si suena. */
   goScene: (scene: SceneId) => void;
   midi: MidiState;
   connectMidi: () => void;
   setLearn: (id: string | null) => void;
   rec: RecState;
   toggleRec: () => void;
+  /** Vista local activa (no es autenticación) o rol asignado por el puente si este equipo es remoto. */
+  role: Role;
+  can: (area: Area) => boolean;
+  remote: boolean;
+  song: Song;
+  assets: AssetState;
+  addStems: (files: File[]) => Promise<void>;
+  addSamples: (files: File[]) => Promise<void>;
+  netState: NetState;
+  setNetState: Dispatch<SetStateAction<NetState>>;
+  transport: (op: 'play' | 'pause' | 'stop') => void;
+  panic: () => void;
+  save: () => void;
+  profile: string;
 }
 export const LiveCtx = createContext<LiveCtxValue | null>(null);
 export function useLive() {
@@ -79,6 +110,7 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     loop: <>{P('M17 2l3 3-3 3')}{P('M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3')}{P('M20 13v2a4 4 0 0 1-4 4H4')}</>,
     keys: <>{P('M3 5h18v14H3zM8 5v9M13 5v9M18 5v9')}</>,
     grid: <>{P('M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z')}</>,
+    brass: <>{P('M3 10v4h3l7 4V6l-7 4z')}{P('M13 9h4l4-3v12l-4-3h-4')}</>,
   };
   return (
     <svg className="ic" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

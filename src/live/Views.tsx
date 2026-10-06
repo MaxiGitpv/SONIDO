@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useLive, Icon, Art } from './ctx';
 import { CH_META, SOUNDS, STYLE_BPM, chIcon, chName } from './data';
 import { ModuleHead } from './nav';
+import { Catalog, SamplerPanel } from './Sampler';
 import { CH_IDS, STYLES } from './types';
 import type { ChId } from './types';
 import { engine } from './engine';
@@ -107,6 +108,7 @@ export function SoundsView() {
           <SourceCard id="tracks" title="Tracks" desc="Pista completa, multitrack mezclado o secuencia." />
         </div>
       </section>
+      <SamplerPanel />
       <section className="organ2">
         <h3>Gospel Organ · rotary y drawbars</h3>
         <div className="organ2-row">
@@ -119,6 +121,7 @@ export function SoundsView() {
         </div>
         <p className="hint2">Los drawbars se aplican a las notas nuevas; el rotary cambia en el momento.</p>
       </section>
+      <Catalog />
     </div>
   );
 }
@@ -147,9 +150,9 @@ export function RoutesView() {
             <div key={id} className="rt-row" style={{ ['--cc' as string]: CH_META[id].color }}>
               <span className="rt-n"><Icon name={chIcon(id)} size={16} /> {chName(s, id)}</span>
               {isClick ? (
-                <button className={`mini${s.clickMonitor ? ' on' : ''}`} onClick={() => d({ type: 'clickMon', on: !s.clickMonitor })}>Solo monitor {s.clickMonitor ? 'ON' : 'OFF'}</button>
+                <span className="mini locked" title="El click nunca llega a la sala, a los efectos ni a la grabación principal">Bloqueado: solo monitores</span>
               ) : (
-                <button className={`mini${!c.mute ? ' on' : ''}`} aria-pressed={!c.mute} onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, mute: !x.mute }) })}>{c.mute ? 'Cortado' : 'Enviado'}</button>
+                <button className={`mini${c.toMain ? ' on' : ''}`} aria-pressed={c.toMain} title="Ruta lógica a la sala; el mute del canal es otro control" onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, toMain: !x.toMain }) })}>{c.toMain ? 'A la sala' : 'Fuera de sala'}</button>
               )}
               <span className="rt-s">{sl(`${chName(s, id)} a reverb`, c.sendRev, (v) => d({ type: 'ch', id, fn: (x) => ({ ...x, sendRev: v }) }))}<b>{fmtDb(c.sendRev)}</b></span>
               <span className="rt-s">{sl(`${chName(s, id)} a delay`, c.sendDly, (v) => d({ type: 'ch', id, fn: (x) => ({ ...x, sendDly: v }) }))}<b>{fmtDb(c.sendDly)}</b></span>

@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLive, Icon } from './ctx';
 import { engine } from './engine';
-import { SCENES } from './types';
 import { clamp } from '../util';
 
 const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 export function Footer() {
-  const { s, d, loadFile, rec, toggleRec } = useLive();
+  const { s, d, loadFile, rec, toggleRec, transport, song } = useLive();
   const file = useRef<HTMLInputElement>(null);
   const taps = useRef<number[]>([]);
   const [tt, setTt] = useState('');
-  const song = s.songs.find((x) => x.id === s.songId)!;
   const track = s.files.tracks;
 
   useEffect(() => {
@@ -44,16 +42,16 @@ export function Footer() {
         </span>
       </button>
       <div className="transport">
-        <button className={`tp play${s.playing ? ' on' : ''}`} aria-label="Reproducir" onClick={() => engine.play()}><Icon name="play" size={22} /></button>
-        <button className="tp" aria-label="Pausa" onClick={() => engine.pause()}><Icon name="pause" size={20} /></button>
-        <button className="tp" aria-label="Detener y volver al inicio" onClick={() => { engine.stop(); d({ type: 'scene', id: song.arr[0]?.scene ?? 'intro' }); }}><Icon name="stop" size={18} /></button>
+        <button className={`tp play${s.playing ? ' on' : ''}`} aria-label="Reproducir" onClick={() => transport('play')}><Icon name="play" size={22} /></button>
+        <button className="tp" aria-label="Pausa" onClick={() => transport('pause')}><Icon name="pause" size={20} /></button>
+        <button className="tp" aria-label="Detener y volver al inicio" onClick={() => transport('stop')}><Icon name="stop" size={18} /></button>
         <button className={`tp rec${rec.on ? ' on' : ''}`} aria-pressed={rec.on} aria-label={rec.on ? 'Detener grabación' : 'Grabar el master'} title={rec.on ? 'Detener grabación' : 'Grabar el master'} onClick={toggleRec}>
           <i className="recdot" />{rec.on && <small>{mmss(rec.secs)}</small>}
         </button>
       </div>
       <button className="fbtn tap" onClick={tap}>Tap tempo <b>{song.bpm}</b></button>
-      <button className={`fbtn mon${s.clickMonitor ? ' on' : ''}`} aria-pressed={s.clickMonitor} onClick={() => d({ type: 'clickMon', on: !s.clickMonitor })} title="Oír el click (canal solo para monitores)">
-        <Icon name="headphones" /> Monitor <i className="led" />
+      <button className={`fbtn mon${s.console.click.solo ? ' on' : ''}`} aria-pressed={s.console.click.solo} onClick={() => d({ type: 'ch', id: 'click', fn: (c) => ({ ...c, solo: !c.solo }) })} title="Escuchar el click por la salida de escucha. Nunca va a la sala.">
+        <Icon name="headphones" /> Click en escucha <i className="led" />
       </button>
       {rec.url && !rec.on && (
         <div className="recout">
@@ -61,7 +59,7 @@ export function Footer() {
           <a className="mini" href={rec.url} download={`SONIDO-${song.title}.${rec.ext}`}>Descargar</a>
         </div>
       )}
-      <div className="scene-now">Escena: <b>{SCENES.find((x) => x.id === s.sceneId)?.label}</b></div>
+      <div className="scene-now">Escena: <b>{song.sections.find((x) => x.id === s.sceneId)?.label}</b></div>
       <button className="fnav" onClick={() => d({ type: 'step', dir: -1 })}><Icon name="prev" size={22} /> Anterior</button>
       <button className="fnav next" onClick={() => d({ type: 'step', dir: 1 })}>Siguiente <Icon name="next" size={22} /></button>
     </footer>

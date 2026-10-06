@@ -1,5 +1,11 @@
 import { build } from 'esbuild';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+
+// Identificación del build: commit fuente (+ «modificado» si hay cambios sin guardar) y fecha.
+const sh = (c) => { try { return execSync(c, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
+const dirty = sh('git status --porcelain --untracked-files=no -- src shared build.mjs') ? '+modificado' : '';
+const BUILD = `${sh('git rev-parse --short HEAD') || 'sin-git'}${dirty} · ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 
 const js = await build({
   entryPoints: ['src/main.tsx'],
@@ -8,22 +14,24 @@ const js = await build({
   format: 'iife',
   target: 'es2020',
   write: false,
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: { 'process.env.NODE_ENV': '"production"', __BUILD__: JSON.stringify(BUILD) },
   jsx: 'automatic',
 });
 const css = await build({ entryPoints: ['src/styles.css'], bundle: true, minify: true, write: false });
 
 const html = `<title>SONIDO</title>
+<meta name="sonido-build" content="${BUILD}">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>${css.outputFiles[0].text}</style>
 <div id="root"></div>
 <script>${js.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>
 `;
 writeFileSync('dist.html', html);
+writeFileSync('index.html', `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}</body></html>`);
 writeFileSync('preview.html', `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}</body></html>`);
 writeFileSync('preview-demo.html', `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}<script>setTimeout(()=>document.querySelector('.demo').click(),200)</script></body></html>`);
 writeFileSync('preview-mon.html', `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}<script>setTimeout(()=>{document.querySelector('.demo').click();document.querySelectorAll('.mixbtn')[2].click()},200)</script></body></html>`);
-console.log('ok', (html.length / 1024).toFixed(0) + ' KB');
+console.log('ok', (html.length / 1024).toFixed(0) + ' KB', BUILD);
 const pv = (name, script) => writeFileSync(name, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}<script>setTimeout(()=>{document.querySelectorAll('.modebtn')[1].click();${script}},250)</script></body></html>`);
 pv('pv-perf.html', '');
 pv('pv-test.html', "setTimeout(()=>{[...document.querySelectorAll('.tbtn')].find(b=>/prueba/i.test(b.textContent)).click();setTimeout(()=>{document.querySelector('.testp-blend .hslider').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:document.querySelector('.testp-blend .hslider').getBoundingClientRect().left+document.querySelector('.testp-blend .hslider').getBoundingClientRect().width*0.5,pointerId:1}))},300)},300)");

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLive, Icon } from './ctx';
 import { ModuleHead } from './nav';
-import { CH_META, chIcon, chName, soundById, layerInfo } from './data';
-import { CH_IDS, IN_IDS, IN_TYPES, INST_IDS, SCENES } from './types';
+import { CH_META, chIcon, chName, kindLabel, soundById, layerInfo } from './data';
+import { CH_IDS, IN_IDS, IN_TYPES, INST_IDS, MUSIC_IDS } from './types';
+import { KIND_COLOR } from './Timeline';
 import type { ChId, InId, InputCfg } from './types';
 import { engine } from './engine';
 import { meterBus } from '../meterEngine';
@@ -17,11 +18,10 @@ import { dbToPos, fmtDb, posToDb } from '../util';
 
 /* ---------- Escenas y repertorio ---------- */
 export function ScenesPage() {
-  const { s, mix: cur, goScene } = useLive();
-  const song = s.songs.find((x) => x.id === s.songId)!;
+  const { s, mix: cur, goScene, song } = useLive();
   return (
     <div className="mpage">
-      <ModuleHead title="Escenas y repertorio" desc="Arreglo de la canción, línea de tiempo y lo que guarda cada escena." />
+      <ModuleHead title="Escenas musicales y repertorio" desc="Arme cualquier estructura: secciones con nombre propio, orden, repeticiones, compases y compás (2/4 a 12/8). Cada sección guarda el sonido, las capas, los niveles musicales y las macros del director; nunca la mezcla del sonidista." />
       <div className="scenes-layout">
         <div className="lcol static">
           <Repertoire />
@@ -29,40 +29,45 @@ export function ScenesPage() {
         <div className="scenes-main">
           <section className="lpanel songpanel">
             <SongHeader />
-            <SceneBar />
+            <SceneBar edit />
           </section>
           <div className="scenecards">
-            {SCENES.map((sc) => {
+            {song.sections.map((sc) => {
               const m = s.mix[s.songId][sc.id];
               const on = s.sceneId === sc.id;
               const bars = song.arr.filter((x) => x.scene === sc.id).reduce((a, x) => a + x.bars, 0);
-              const active = CH_IDS.filter((id) => !m.chans[id].mute && id !== 'click');
+              const active = MUSIC_IDS.filter((id) => m.music[id]?.on);
               return (
-                <article key={sc.id} className={`scenecard${on ? ' on' : ''}`}>
+                <article key={sc.id} className={`scenecard${on ? ' on' : ''}`} style={{ ['--sc' as string]: KIND_COLOR[sc.kind] }}>
                   <header>
                     <h3>{sc.label}</h3>
-                    <span>{bars} compases</span>
+                    <span>{bars ? `${bars} compases` : 'fuera del orden'}</span>
                   </header>
+                  <p className="sc-kind">{kindLabel(sc.kind)}</p>
                   <p className="sc-sound">{soundById(m.sound).name}</p>
                   <p className="sc-layers">{m.layers.map((l) => layerInfo(m.sound, l.ch).name).join(' + ')}</p>
-                  <div className="sc-bars" aria-label="Niveles de los instrumentos">
-                    {INST_IDS.map((id) => (
-                      <i key={id} title={`${CH_META[id].name}: ${m.chans[id].mute ? 'silenciado' : `${fmtDb(m.chans[id].fader)} dB`}`}
-                        style={{ background: CH_META[id].color, height: `${m.chans[id].mute ? 4 : Math.max(8, dbToPos(m.chans[id].fader) * 100)}%`, opacity: m.chans[id].mute ? 0.25 : 1 }} />
-                    ))}
+                  <div className="sc-bars" aria-label="Niveles musicales">
+                    {INST_IDS.map((id) => {
+                      const ml = m.music[id];
+                      const onx = !!ml?.on;
+                      return (
+                        <i key={id} title={`${CH_META[id].name}: ${onx ? `${fmtDb(ml!.db)} dB` : 'apagado'}`}
+                          style={{ background: CH_META[id].color, height: `${onx ? Math.max(8, dbToPos(ml!.db - 6) * 100) : 4}%`, opacity: onx ? 1 : 0.25 }} />
+                      );
+                    })}
                   </div>
                   <dl>
-                    <div><dt>Canales abiertos</dt><dd>{active.length}</dd></div>
+                    <div><dt>Instrumentos activos</dt><dd>{active.length}</dd></div>
                     <div><dt>Ambiente</dt><dd>{Math.round(m.macros.ambience * 100)} %</dd></div>
                     <div><dt>Brillo</dt><dd>{Math.round(m.macros.brightness * 100)} %</dd></div>
                     <div><dt>Expresión</dt><dd>{Math.round(m.macros.expression * 100)} %</dd></div>
                   </dl>
-                  <button className={`mini${on ? ' on' : ''}`} onClick={() => goScene(sc.id)}>{on ? 'Escena actual' : 'Ir a esta escena'}</button>
+                  <button className={`mini${on ? ' on' : ''}`} onClick={() => goScene(sc.id)}>{on ? 'Sección actual' : 'Ir a esta sección'}</button>
                 </article>
               );
             })}
           </div>
-          <p className="hint2">Escena actual: <b>{SCENES.find((x) => x.id === s.sceneId)?.label}</b> · {soundById(cur.sound).name}. Los cambios que haga en cualquier módulo quedan en esta escena; use «Guardar escena» para conservarlos en este navegador.</p>
+          <p className="hint2">Sección actual: <b>{song.sections.find((x) => x.id === s.sceneId)?.label}</b> · {soundById(cur.sound).name}. Use «Guardar» para conservar los cambios en este navegador.</p>
         </div>
       </div>
     </div>
@@ -170,7 +175,9 @@ const ERR: Record<string, string> = {
 };
 
 export function InputsPage() {
-  const { s, d, mix } = useLive();
+  const { s, d, mix, can, remote } = useLive();
+  const lock = !can('inputs');
+  const shared = (dev: string | null) => (dev ? IN_IDS.filter((x) => s.inputs[x].device === dev) : []);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [status, setStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [err, setErr] = useState('');
@@ -222,7 +229,7 @@ export function InputsPage() {
               <select aria-label="Tipo de fuente" value={cfg.type} onChange={(e) => set(id, { type: e.target.value as InputCfg['type'] })}>
                 {IN_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
-              <select aria-label="Entrada del equipo" value={cfg.device ?? ''} disabled={status !== 'ok'} onChange={(e) => set(id, { device: e.target.value || null })}>
+              <select aria-label="Entrada del equipo" value={cfg.device ?? ''} disabled={status !== 'ok' || lock || remote} onChange={(e) => set(id, { device: e.target.value || null })}>
                 <option value="">{status === 'ok' ? 'Sin asignar' : 'Active las entradas primero'}</option>
                 {devices.map((dv, i) => <option key={dv.deviceId || i} value={dv.deviceId}>{dv.label || `Entrada ${i + 1}`}</option>)}
               </select>
@@ -232,10 +239,13 @@ export function InputsPage() {
                 <option value="R">Derecho / 2</option>
               </select>
               <div className="in-gain">
-                <Knob label="" value={cfg.trim} min={-20} max={40} step={0.5} def={0} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`} onChange={(v) => set(id, { trim: v })} />
+                <Knob label="" value={cfg.trim} min={-20} max={40} step={0.5} def={0} disabled={lock} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`} onChange={(v) => set(id, { trim: v })} />
                 <button className={`mini${cfg.polarity ? ' on' : ''}`} aria-pressed={cfg.polarity} title="Invertir polaridad" onClick={() => set(id, { polarity: !cfg.polarity })}>Ø</button>
               </div>
-              <InMeter id={id} />
+              <div className="in-cap">
+                <InMeter id={id} />
+                <small>{capText(cfg.device, cfg.side, shared(cfg.device).length)}</small>
+              </div>
               <div className="in-ch">
                 <button className={`ms m${c.mute ? ' on' : ''}`} aria-pressed={c.mute} onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, mute: !x.mute }) })}>M</button>
                 <HSlider label={`Nivel de ${cfg.name}`} value={c.fader} toPos={dbToPos} fromPos={posToDb} snap={(x) => (Math.abs(x) < 1 ? 0 : Math.round(x * 2) / 2)} color={CH_META[id].color} onChange={(v) => d({ type: 'ch', id, fn: (x) => ({ ...x, fader: v }) })} />
@@ -249,6 +259,20 @@ export function InputsPage() {
       <p className="hint2">{cfgHint(s.inputs)}</p>
     </div>
   );
+}
+
+function capText(device: string | null, side: string, users: number) {
+  if (!device) return 'Sin fuente asignada';
+  const cap = engine.inputCaps(device);
+  const parts: string[] = [];
+  if (cap) {
+    parts.push(`${cap.channels} ${cap.channels === 1 ? 'canal efectivo' : 'canales efectivos'}`);
+    if (cap.channels < 2 && side !== 'mix') parts.push('sin lado L/R: se usa la suma');
+    if (cap.settings.echoCancellation || cap.settings.noiseSuppression || cap.settings.autoGainControl) parts.push('el navegador mantiene procesamiento de voz');
+    if (cap.settings.sampleRate) parts.push(`${cap.settings.sampleRate / 1000} kHz`);
+  } else parts.push('abriendo…');
+  if (users > 1) parts.push(`misma fuente que otras ${users - 1} entradas`);
+  return parts.join(' · ');
 }
 
 function cfgHint(inputs: Record<InId, InputCfg>) {
