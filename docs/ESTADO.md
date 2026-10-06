@@ -23,6 +23,7 @@ Tres niveles de verificación, nunca mezclados: **software** (pruebas automátic
 
 - `npm test`: 23 de la app (modelo del estudio, migraciones, permisos, escenas, conversión del fader…) y 4 del puente.
 - `node scripts/verify-audio.mjs`: 12 pruebas de audio en Chrome real (alineación por cancelación de un par invertido, pausa, búsqueda, repetición de sección, mover, dividir, fundidos, onda en su sitio, click fuera de la sala, dominios, tablet, versión procesada).
+- `node scripts/verify-regresion.mjs`: MIDI con un dispositivo sintético inyectado en la Web MIDI API (nota, sustain, Program Change), fader medido (−20 dB → 20,5 dB), escena de mezcla, grabación WebM/Opus real, reapertura detenida.
 - `node scripts/verify-red.mjs`, `node scripts/shots.mjs`, `node scripts/input-test.mjs`: red, distribución y entrada real.
 
 ## MVP pendiente (con el usuario)
