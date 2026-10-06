@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLive, Icon, Art } from './ctx';
 import { CH_META, KEY_NAMES, EQ_NAMES, chName, isBlack, layerInfo, noteName } from './data';
-import { PLAYABLE, SCENES, STYLES } from './types';
+import { PLAYABLE, STYLES, TIME_SIGS } from './types';
 import type { Chan, ChId, Style, Zone } from './types';
 import { engine } from './engine';
 import { chanResponse, LIVE_KINDS } from './eqmath';
@@ -18,8 +18,8 @@ export function SongHeader() {
   const { s, d } = useLive();
   const song = s.songs.find((x) => x.id === s.songId)!;
   const gi = s.songs.findIndex((x) => x.id === s.songId);
-  const si = SCENES.findIndex((x) => x.id === s.sceneId);
-  const next = si < SCENES.length - 1 ? SCENES[si + 1].label : (s.songs[gi + 1]?.title ?? '—');
+  const si = song.sections.findIndex((x) => x.id === s.sceneId);
+  const next = si < song.sections.length - 1 ? song.sections[si + 1].label : (s.songs[gi + 1]?.title ?? '—');
   return (
     <div className="songhead">
       <div className="songnav" role="group" aria-label="Canción anterior o siguiente">
@@ -41,6 +41,12 @@ export function SongHeader() {
         <input type="number" min={40} max={200} value={song.bpm} aria-label="BPM" onChange={(e) => d({ type: 'songEdit', id: song.id, patch: { bpm: clamp(Number(e.target.value) || 60, 40, 200) } })} />
         <span>BPM</span>
       </label>
+      <label className="pill">
+        <span className="sr">Compás</span>
+        <select value={song.ts} aria-label="Compás" onChange={(e) => d({ type: 'songEdit', id: song.id, patch: { ts: e.target.value as typeof song.ts } })}>
+          {TIME_SIGS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </label>
       <label className="pill style">
         <span>Ritmo</span>
         <select value={song.style} onChange={(e) => d({ type: 'style', style: e.target.value as Style })}>
@@ -55,18 +61,18 @@ export function SongHeader() {
   );
 }
 
-export function SceneBar() {
-  const { s, goScene } = useLive();
+export function SceneBar({ edit }: { edit?: boolean }) {
+  const { s, goScene, song } = useLive();
   return (
     <>
-      <div className="scenebar" role="tablist" aria-label="Escenas">
-        {SCENES.map((sc) => (
+      <div className="scenebar" role="tablist" aria-label="Secciones" style={{ gridTemplateColumns: `repeat(${Math.min(8, song.sections.length)}, minmax(0, 1fr))` }}>
+        {song.sections.map((sc) => (
           <button key={sc.id} role="tab" aria-selected={s.sceneId === sc.id} className={`scenebtn${s.sceneId === sc.id ? ' on' : ''}`} onClick={() => goScene(sc.id)}>
             {sc.label}
           </button>
         ))}
       </div>
-      <Timeline />
+      <Timeline edit={edit} />
     </>
   );
 }
@@ -79,29 +85,30 @@ const ZONES: { id: Zone; label: string }[] = [
 ];
 
 export function SoundLayers() {
-  const { s, d, mix } = useLive();
+  const { s, d, mix, can } = useLive();
+  const canMusic = can('music');
   const [adding, setAdding] = useState(false);
   const free = PLAYABLE.filter((id) => !mix.layers.some((l) => l.ch === id));
   return (
     <div className="layers">
       {mix.layers.map((l) => {
-        const c = mix.chans[l.ch];
+        const ml = mix.music[l.ch] ?? { db: 0, on: true };
+        const off = !ml.on;
         const info = layerInfo(mix.sound, l.ch);
         return (
-          <div key={l.ch} className={`layer${s.selected === l.ch ? ' sel' : ''}${c.mute ? ' muted' : ''}`} style={{ ['--cc' as string]: CH_META[l.ch].color }}>
+          <div key={l.ch} className={`layer${s.selected === l.ch ? ' sel' : ''}${off ? ' muted' : ''}`} style={{ ['--cc' as string]: CH_META[l.ch].color }}>
             <i className="layer-bar" />
             <Art ch={l.ch} />
             <button className="layer-t" onClick={() => d({ type: 'select', id: l.ch })} title="Editar EQ y dinámica de esta capa">
               <b>{info.name}</b>
-              <small>{info.desc}{c.mute ? ' · silenciada' : ''}</small>
+              <small>{info.desc}{off ? ' · apagada en esta sección' : ''}</small>
             </button>
             <select className="zone" aria-label={`Zona del teclado para ${info.name}`} value={l.zone} onChange={(e) => d({ type: 'layerZone', ch: l.ch, zone: e.target.value as Zone })}>
               {ZONES.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
             </select>
-            <Knob label="Vol" value={c.fader} min={-60} max={6} step={0.5} def={0} format={(v) => `${fmtDb(v)} dB`} onChange={(v) => d({ type: 'ch', id: l.ch, fn: (x) => ({ ...x, fader: v }) })} />
-            <Knob label="Pan" value={c.pan} min={-100} max={100} step={1} def={0} format={(v) => (Math.round(v) === 0 ? 'C' : v < 0 ? `L${-Math.round(v)}` : `R${Math.round(v)}`)} onChange={(v) => d({ type: 'ch', id: l.ch, fn: (x) => ({ ...x, pan: Math.abs(v) < 4 ? 0 : v }) })} />
+            <Knob label="Nivel" value={ml.db} min={-30} max={6} step={0.5} def={0} format={(v) => `${fmtDb(v)} dB`} disabled={!canMusic} onChange={(v) => d({ type: 'music', id: l.ch, patch: { db: v } })} />
             <div className="layer-btns">
-              <button className={`iconbtn${c.mute ? ' warn' : ''}`} aria-pressed={!c.mute} title={c.mute ? 'Activar capa' : 'Silenciar capa'} onClick={() => d({ type: 'ch', id: l.ch, fn: (x) => ({ ...x, mute: !x.mute }) })}>
+              <button className={`iconbtn${off ? ' warn' : ''}`} aria-pressed={!off} disabled={!canMusic} title={off ? 'Encender capa en esta sección' : 'Apagar capa en esta sección'} onClick={() => d({ type: 'music', id: l.ch, patch: { on: off } })}>
                 <Icon name="power" size={15} />
               </button>
               <button className="iconbtn" aria-label={`Quitar ${info.name}`} title="Quitar capa" disabled={mix.layers.length <= 1} onClick={() => d({ type: 'layerRemove', ch: l.ch })}>

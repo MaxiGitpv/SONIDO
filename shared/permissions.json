@@ -1,0 +1,30 @@
+{
+  "comment": "Tabla única de permisos. La usan la app (bloqueo de controles por vista) y el puente de red (validación de cada orden remota). Un perfil local no es autenticación.",
+  "areas": {
+    "song": "music", "songStep": "music", "scene": "music", "step": "music", "sound": "music", "layerAdd": "music", "layerRemove": "music", "layerZone": "music",
+    "music": "music", "macro": "music", "drawbar": "music", "split": "music", "transpose": "music", "octave": "music", "sustain": "music", "playMode": "music",
+    "src": "music", "file": "music", "songEdit": "music", "style": "music", "bars": "music", "end": "music", "songAdd": "music",
+    "secAdd": "music", "secEdit": "music", "secRemove": "music", "arrAdd": "music", "arrRemove": "music", "arrMove": "music", "arrScene": "music",
+    "stemAdd": "music", "stemEdit": "music", "stemRemove": "music", "stemsOnly": "music",
+    "zoneAdd": "music", "zoneEdit": "music", "zoneRemove": "music", "samplerEdit": "music",
+    "midi": "midi",
+    "ch": "console", "chput": "console", "preset": "console", "clearSolo": "console",
+    "busAdd": "buses", "busEdit": "buses", "busRemove": "buses", "aux": "buses",
+    "master": "master", "fx": "fx", "input": "inputs", "outputs": "outputs",
+    "mixSave": "mixscenes", "mixLoad": "mixscenes", "mixRename": "mixscenes", "mixDelete": "mixscenes", "mixUndo": "mixscenes", "mixDup": "mixscenes", "mask": "mixscenes", "protect": "mixscenes",
+    "transport": "transport", "panic": "transport",
+    "import": "admin", "replace": "admin"
+  },
+  "roles": {
+    "all": ["music", "midi", "console", "buses", "master", "fx", "inputs", "outputs", "mixscenes", "transport", "admin"],
+    "mixer": ["console", "buses", "master", "fx", "inputs", "outputs", "mixscenes", "transport"],
+    "director": ["music", "midi", "transport"],
+    "musico": ["aux-own"]
+  },
+  "labels": {
+    "all": "Todo (una persona)",
+    "mixer": "Sonidista",
+    "director": "Director de alabanza",
+    "musico": "Músico"
+  }
+}

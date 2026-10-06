@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useLive, Icon } from './ctx';
-import { CH_META, chIcon, chName } from './data';
+import { BASIC_EQ, CH_META, chIcon, chName } from './data';
 import { CH_IDS, INST_IDS, IN_IDS, isInput } from './types';
 import type { ChId, StripGroup } from './types';
 import { Expand } from './nav';
@@ -14,7 +14,7 @@ function Source({ id }: { id: ChId }) {
   const { s, d, loadFile } = useLive();
   const input = useRef<HTMLInputElement>(null);
   const name = s.files[id];
-  if (id === 'click') return <div className={`ls-badge${s.clickMonitor ? ' live' : ''}`}><Icon name="headphones" size={12} />Monitor</div>;
+  if (id === 'click') return <div className="ls-badge" title="Solo va a monitores y a la escucha"><Icon name="headphones" size={12} />Solo monitores</div>;
   if (isInput(id)) return <div className={`ls-badge${s.inputs[id].device ? ' live' : ''}`}>{s.inputs[id].device ? 'Entrada activa' : 'Sin entrada'}</div>;
   if (id !== 'pad' && id !== 'drums' && id !== 'tracks') return <div className="ls-badge">{CH_META[id].badge}</div>;
   const pick = (
@@ -37,26 +37,34 @@ function Source({ id }: { id: ChId }) {
   );
 }
 
-function Strip({ id }: { id: ChId }) {
-  const { s, d, mix } = useLive();
+function Strip({ id, tall }: { id: ChId; tall?: boolean }) {
+  const { s, d, mix, can } = useLive();
+  const lock = !can('console');
   const c = mix.chans[id];
   const meta = { ...CH_META[id], name: chName(s, id) };
   const sel = s.selected === id;
   return (
-    <div className={`lstrip${sel ? ' sel' : ''}${c.mute ? ' muted' : ''}`} style={{ ['--cc' as string]: meta.color }}>
+    <div className={`lstrip${sel ? ' sel' : ''}${c.mute ? ' muted' : ''}${lock ? ' locked' : ''}`} style={{ ['--cc' as string]: meta.color }} title={lock ? 'Consola del sonidista: solo lectura en esta vista' : undefined}>
       <button className="ls-head" onClick={() => d({ type: 'select', id })} onDoubleClick={() => d({ type: 'editor', id })} aria-pressed={sel} title="Seleccionar canal. Doble toque: abrir el editor">
         <Icon name={chIcon(id)} size={15} />
         <span>{meta.name}</span>
       </button>
       <div className="ls-pan">
-        <Knob label="" value={c.pan} min={-100} max={100} step={1} def={0} format={panFmt} onChange={(v) => d({ type: 'ch', id, fn: (x) => ({ ...x, pan: Math.abs(v) < 4 ? 0 : v }) })} />
+        <Knob label="" value={c.pan} min={-100} max={100} step={1} def={0} format={panFmt} disabled={lock} onChange={(v) => d({ type: 'ch', id, fn: (x) => ({ ...x, pan: Math.abs(v) < 4 ? 0 : v }) })} />
       </div>
+      {tall && (
+        <div className="ls-beq" aria-label="EQ básico (mismas bandas que el EQ avanzado)">
+          {BASIC_EQ.map((b) => (
+            <Knob key={b.band} label={b.label} value={c.eq[b.band].gain} min={-15} max={15} step={0.5} def={0} disabled={lock} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`} onChange={(v) => d({ type: 'ch', id, fn: (x) => ({ ...x, eqOn: true, eq: x.eq.map((q, i) => (i === b.band ? { ...q, gain: v, on: true } : q)) }) })} />
+          ))}
+        </div>
+      )}
       <div className="ls-ms">
-        <button className={`ms m${c.mute ? ' on' : ''}`} aria-pressed={c.mute} aria-label={`Mute ${meta.name}`} onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, mute: !x.mute }) })}>M</button>
-        <button className={`ms s${c.solo ? ' on' : ''}`} aria-pressed={c.solo} aria-label={`Solo ${meta.name}`} onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, solo: !x.solo }) })}>S</button>
+        <button className={`ms m${c.mute ? ' on' : ''}`} disabled={lock} aria-pressed={c.mute} aria-label={`Mute ${meta.name}`} onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, mute: !x.mute }) })}>M</button>
+        <button className={`ms s${c.solo ? ' on' : ''}`} disabled={lock} aria-pressed={c.solo} aria-label={`Escucha (PFL) ${meta.name}`} title="Escucha previa (PFL): no cambia la sala" onClick={() => d({ type: 'ch', id, fn: (x) => ({ ...x, solo: !x.solo }) })}>S</button>
       </div>
       <div className="ls-fader" onPointerDown={() => d({ type: 'select', id })}>
-        <Fader label={`Nivel de ${meta.name}`} value={c.fader} color={meta.color} meterKey={`live:${id}`} onChange={(v) => d({ type: 'ch', id, fn: (x) => ({ ...x, fader: v }) })} />
+        <Fader label={`Nivel de ${meta.name}`} value={c.fader} color={meta.color} meterKey={`live:${id}`} disabled={lock} onChange={(v) => d({ type: 'ch', id, fn: (x) => ({ ...x, fader: v }) })} />
       </div>
       <div className="ls-db">{fmtDb(c.fader)} dB</div>
       <div className="ls-foot">
@@ -70,7 +78,8 @@ function Strip({ id }: { id: ChId }) {
 }
 
 export function MasterStrip() {
-  const { s, d } = useLive();
+  const { s, d, can } = useLive();
+  const lock = !can('master');
   return (
     <div className="lstrip mstr" style={{ ['--cc' as string]: '#dfe9f7' }}>
       <div className="ls-head static">
@@ -79,10 +88,10 @@ export function MasterStrip() {
       </div>
       <div className="ls-pan lr"><span>L</span><span>R</span></div>
       <div className="ls-ms single">
-        <button className={`ms m${s.masterMute ? ' on' : ''}`} aria-pressed={s.masterMute} aria-label="Mute master" onClick={() => d({ type: 'master', mute: !s.masterMute })}>M</button>
+        <button className={`ms m${s.masterMute ? ' on' : ''}`} disabled={lock} aria-pressed={s.masterMute} aria-label="Mute master" onClick={() => d({ type: 'master', mute: !s.masterMute })}>M</button>
       </div>
       <div className="ls-fader">
-        <Fader label="Master" value={s.master} color="#dfe9f7" meterKey="live:master" stereo onChange={(v) => d({ type: 'master', db: v })} />
+        <Fader label="Master" value={s.master} color="#dfe9f7" meterKey="live:master" stereo disabled={lock} onChange={(v) => d({ type: 'master', db: v })} />
       </div>
       <div className="ls-db">{fmtDb(s.master)} dB</div>
       <div className="ls-foot"><div className="ls-badge">Salida</div></div>
@@ -112,7 +121,7 @@ export function StripRow({ tall }: { tall?: boolean }) {
         {!tall && <Expand tab="mixer" label="Mezcla" />}
       </div>
       <div className="striprow">
-        {ids.map((id) => <Strip key={id} id={id} />)}
+        {ids.map((id) => <Strip key={id} id={id} tall={tall} />)}
         <i className="sep" aria-hidden="true" />
         <MasterStrip />
       </div>
