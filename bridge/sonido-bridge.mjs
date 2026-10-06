@@ -290,8 +290,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const b = await startBridge();
   const ips = lanAddresses();
   console.log('\nSONIDO · puente local activo');
-  console.log(`  En este equipo:  http://127.0.0.1:${b.port}`);
-  ips.forEach((ip) => console.log(`  En la red:       http://${ip}:${b.port}`));
+  console.log(`  PC anfitrión (audio, micrófonos y MIDI):  http://localhost:${b.port}`);
+  ips.forEach((ip) => console.log(`  Tablets y otros equipos (solo control):  http://${ip}:${b.port}`));
+  console.log('  (Por la IP el navegador no permite micrófonos ni MIDI: abra el anfitrión siempre por localhost.)');
   console.log('\n  PIN por rol (compártalos solo con quien corresponda):');
   console.log(`    Anfitrión (equipo con el audio): ${b.pins.host}`);
   console.log(`    Sonidista:                       ${b.pins.mixer}`);

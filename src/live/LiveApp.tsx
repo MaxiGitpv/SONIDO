@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { LiveCtx, Icon } from './ctx';
+import { envCaps, whyNot } from './env';
 import type { AssetState, LiveCtxValue, MidiState, NetState, RecState } from './ctx';
 import { connectMidi as openMidi, describe } from './midi';
 import type { MidiMsg } from './midi';
@@ -83,6 +84,8 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
   const [held, setHeld] = useState<number[]>([]);
   const [gear, setGear] = useState(false);
   const tabsRef = useRef<HTMLElement>(null);
+  const caps = useMemo(envCaps, []);
+  const [hideSecure, setHideSecure] = useState(false);
   // La pestaña activa siempre queda a la vista aunque la barra no quepa entera.
   useEffect(() => {
     tabsRef.current?.querySelector<HTMLElement>('button.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -436,7 +439,7 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
       .then((devices) => setMidi((x) => ({ ...x, status: 'on', devices, error: devices.length ? '' : 'Acceso MIDI listo, pero no hay ningún teclado o controlador conectado. Conéctelo por USB; aparecerá aquí.' })))
       .catch((e: unknown) => {
         const n = e instanceof Error ? (e.message === 'unsupported' ? 'unsupported' : e.name) : '';
-        setMidi((x) => ({ ...x, status: 'error', error: n === 'unsupported' ? 'Este navegador no tiene MIDI. Use Chrome o Edge en computador.' : 'El navegador no dio permiso para MIDI. Si está en el visor de Claude, abra la versión publicada.' }));
+        setMidi((x) => ({ ...x, status: 'error', error: n === 'unsupported' ? whyNot(envCaps(), 'midi') ?? 'Este navegador no tiene MIDI.' : 'El navegador no dio permiso para MIDI. Si está en el visor de Claude, abra la versión publicada.' }));
       });
   }, []);
   const setLearn = useCallback((id: string | null) => {
@@ -648,9 +651,21 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
           <span><small>Audio</small> {remote ? 'en el equipo anfitrión' : audioOn && sr ? `${+(sr / 1000).toFixed(1)} kHz${lat ? ` · ${lat} muestras` : ''} · ${engine.outputInfo().channels} canales de salida` : 'en espera (toque para activar)'}</span>
           <span title="Los instrumentos son síntesis propia; micrófonos, archivos y MIDI son reales"><small>Instrumentos</small> síntesis</span>
           <span className={`st-net ${netState.status}`}><small>Red</small> {netState.status === 'on' ? (netState.host ? `anfitrión · ${Math.max(0, netState.peers.length - 1)} conectados` : 'cliente') : netState.status === 'connecting' ? 'conectando…' : 'local'}{netState.mixer ? ` · mesa ${netState.mixer.model}` : ''}</span>
+          <span className={`st-caps${caps.capture ? '' : ' warn'}`} title={caps.capture ? 'Contexto seguro: micrófonos y MIDI disponibles' : whyNot(caps, 'capture') ?? ''}><small>Equipo</small> {remote ? 'control remoto (sin audio local)' : caps.capture ? 'audio local · captura y MIDI' : 'audio local sin captura ni MIDI'}</span>
           <span className="st-build" title="Commit fuente y fecha de compilación"><small>Versión</small> {BUILD}</span>
         </div>
 
+        {!caps.secure && !remote && !hideSecure && (
+          <div className="securebar" role="note">
+            <p>
+              <b>Esta dirección no permite micrófonos, MIDI ni elegir salida</b> ({caps.origin} no es un contexto seguro).
+              {' '}Si este es el <b>PC anfitrión</b>, ábralo como {caps.hostUrl ? <a href={caps.hostUrl}>{caps.hostUrl}</a> : 'http://localhost:8790'}.
+              {' '}Si es una <b>tablet</b>, conéctese como control remoto en «Red y mesa»: el audio lo produce el anfitrión.
+            </p>
+            <button className="mini on" onClick={() => dRaw({ type: 'tab', tab: 'network' })}>Usar como control remoto</button>
+            <button className="mini" aria-label="Ocultar aviso" onClick={() => setHideSecure(true)}>Entendido</button>
+          </div>
+        )}
         <div className={`lbody tab-${s.tab}`}>
           {wide && s.tab === 'live' && left}
           {!wide && s.leftOpen && (

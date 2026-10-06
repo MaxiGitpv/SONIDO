@@ -20,6 +20,8 @@ export function startEmulator({ port = 10024, name = 'XR18-Emulador', model = 'X
     values.set(`${ch}/mix/on`, { type: 'i', value: 1 });
     values.set(`${ch}/mix/pan`, { type: 'f', value: 0.5 });
     values.set(`${ch}/config/name`, { type: 's', value: `Canal ${c}` });
+    // Fuente del canal: entrada física c (0..15); el canal 16 se emula como retorno USB (sin preamp).
+    values.set(`${ch}/config/insrc`, { type: 'i', value: c === 16 ? 16 : c - 1 });
     values.set(`/headamp/${String(c).padStart(2, '0')}/gain`, { type: 'f', value: 0.1667 });
     values.set(`/headamp/${String(c).padStart(2, '0')}/phantom`, { type: 'i', value: 0 });
     for (let b = 1; b <= 6; b++) values.set(`${ch}/mix/${String(b).padStart(2, '0')}/level`, { type: 'f', value: 0 });
