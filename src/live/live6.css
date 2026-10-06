@@ -1,0 +1,76 @@
+/*
+ * C6.1 — Distribución, desplazamiento y faders.
+ * Va después de live.css…live5.css y sustituye sus alturas fijas: cabecera, estado y pie miden lo que su
+ * contenido necesita y el cuerpo recibe el resto. Cada zona que puede crecer tiene su propio desplazamiento.
+ */
+.live, .live.narrow { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.lhead { min-height: 60px; padding-block: 6px; }
+.lfoot { min-height: 64px; padding-block: 8px; }
+.lbody { position: relative; }
+/* El cajón del repertorio (pantallas estrechas) se ancla al cuerpo, no a medidas de cabecera/pie. */
+.lscrim { position: absolute; inset: 0; z-index: 30; }
+.ldrawer { position: absolute; top: 0; bottom: 0; left: 0; z-index: 31; width: min(320px, 88vw); }
+
+/* Pestañas: se desplazan con rueda, touchpad o dedo; barra fina visible para saber que hay más. */
+.ltabs { scrollbar-width: thin; scrollbar-color: #24405f transparent; overscroll-behavior-x: contain; }
+.ltabs::-webkit-scrollbar { height: 4px; }
+.ltabs::-webkit-scrollbar-thumb { background: #24405f; border-radius: 2px; }
+
+/* Estado: una sola línea compacta; si no cabe, se desplaza en horizontal dentro de sí misma. */
+.statusbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-block: 3px; }
+.statusbar::-webkit-scrollbar { display: none; }
+.statusbar .st-build { margin-left: auto; opacity: .75; }
+
+/* Columna izquierda: el repertorio tiene su propia lista desplazable; el banco se puede plegar. */
+.lcol { grid-template-rows: minmax(160px, 1.15fr) minmax(0, 1fr); min-height: 0; }
+.lcol:has(.bank-panel.folded) { grid-template-rows: minmax(0, 1fr) auto; }
+.lcol.static { grid-template-rows: auto; }
+.rep-panel { display: flex; flex-direction: column; min-height: 0; }
+.rep-panel .setlist small { color: var(--ldim); }
+.rep-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #24405f transparent; margin-right: -6px; padding-right: 6px; border-radius: 6px; }
+.rep-list:focus-visible { outline: 2px solid var(--cy); outline-offset: 2px; }
+.lcol.static .rep-list { max-height: none; overflow: visible; }
+.bank-panel { min-height: 0; }
+.bank-panel.folded { padding-bottom: 8px; }
+.bank-panel.folded .ph { margin-bottom: 2px; }
+.bank-panel .bank { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #24405f transparent; }
+
+/* Centro: decide columnas por el ancho real disponible, no por el de la ventana. */
+.lcenter { container-type: inline-size; container-name: centro; }
+@container centro (max-width: 940px) {
+  .midrow { grid-template-columns: minmax(0, 1fr); }
+}
+.midrow > * { min-width: 0; }
+.layer { grid-template-columns: 4px 52px minmax(0, 1fr) auto auto auto; gap: 8px; }
+.layer .art { width: 52px; }
+
+/* Estructura musical: nombres completos; si no caben, la pista se desplaza dentro de su panel. */
+.tl-scroll { overflow-x: auto; overflow-y: visible; padding: 4px 0 6px; scrollbar-width: thin; scrollbar-color: #24405f transparent; }
+.tl-scroll .tl-track { min-width: 100%; width: max-content; }
+.tl-seg { min-width: max-content; padding-right: 4px; }
+.tl-name { flex: 1 0 auto; overflow: visible; text-overflow: clip; padding: 0 10px; }
+.tl-count { font: 600 11px var(--mono); color: rgba(255, 255, 255, .7); padding: 0 6px 0 0; }
+
+/* Tiras de canal: columna flexible; el fader recibe el alto que sobra y nunca lo ocupan los botones. */
+.lstrip { display: flex; flex-direction: column; }
+.lstrip > * { flex: none; }
+.lstrip > .ls-fader { flex: 1 1 auto; min-height: 150px; }
+.stripscroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #24405f transparent; min-height: 0; height: 100%; }
+.stripscroll .striprow { min-height: 0; }
+.mixer .stripscroll { min-height: 520px; }
+.mixer .lstrip > .ls-fader { min-height: 200px; }
+
+/* Fader: el carril acepta el gesto vertical; un gesto horizontal sigue desplazando la fila de canales. */
+.fader-track { touch-action: pan-x; }
+.fader-track:focus-visible { outline: 2px solid var(--cy); outline-offset: 1px; border-radius: 4px; }
+.live .fader { grid-template-columns: 20px minmax(28px, 1fr) auto; gap: 3px; }
+.live .fader-scale span { font-size: 9px; }
+.live .fader-scale span.zero { color: #fff; }
+.live .tick.zero { background: #5d7a99; }
+.ls-db { font-size: 12.5px; padding-top: 2px; }
+
+/* Ventanas bajas: menos alto fijo en Inicio para que la consola no quede cortada. */
+@media (max-height: 800px) {
+  .scenebtn { min-height: 38px; font-size: 16px; }
+  .songpanel { padding-block: 8px; }
+}

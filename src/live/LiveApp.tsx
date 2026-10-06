@@ -82,6 +82,11 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
   const [audioOn, setAudioOn] = useState(false);
   const [held, setHeld] = useState<number[]>([]);
   const [gear, setGear] = useState(false);
+  const tabsRef = useRef<HTMLElement>(null);
+  // La pestaña activa siempre queda a la vista aunque la barra no quepa entera.
+  useEffect(() => {
+    tabsRef.current?.querySelector<HTMLElement>('button.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [s.tab, s.view]);
   const [assets, setAssets] = useState<AssetState>({});
   const [netState, setNetState] = useState<NetState>({ status: 'off', detail: '', role: 'all', host: false, hostPresent: false, peers: [], ownBus: '', mixers: [], mixer: null, values: {}, meters: [], levels: {} });
   const rel = useRef(new Map<number, { release: () => void; fromMidi: boolean }>());
@@ -614,7 +619,7 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
               ))}
             </div>
           )}
-          <nav className="ltabs" aria-label="Secciones">
+          <nav className="ltabs" aria-label="Secciones" ref={tabsRef} onWheel={(e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY; }}>
             {tabs.map((t) => (
               <button key={t.id} className={s.tab === t.id ? 'on' : ''} aria-current={s.tab === t.id ? 'page' : undefined} onClick={() => dRaw({ type: 'tab', tab: t.id })}>
                 <Icon name={t.icon} size={15} />

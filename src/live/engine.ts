@@ -3,7 +3,7 @@ import { CH_IDS, IN_IDS, INST_IDS, MONITOR_ONLY, isMusical } from './types';
 import { GROOVES, PERC, PERC_HITS, at } from './rhythm';
 import type { Hit } from './rhythm';
 import { meterBus } from '../meterEngine';
-import { FLOOR, dbToLin } from '../util';
+import { FLOOR, dbToLin, faderGain } from '../util';
 
 /*
  * Motor de audio único de SONIDO (Web Audio API). Ver docs/FLUJO-AUDIO.md.
@@ -83,7 +83,7 @@ export interface Position {
 }
 
 const mtof = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
-const lin = (db: number) => (db <= -89.5 ? 0 : dbToLin(db));
+const lin = faderGain;
 const DRAW_H = [0.5, 1.5, 1, 2, 3, 4, 5, 6, 8];
 const PROG: [number, boolean][] = [[0, false], [7, false], [9, true], [5, false]]; // I V vi IV
 const LATIN: Style[] = ['salsa', 'tumbao', 'merengue', 'samba'];

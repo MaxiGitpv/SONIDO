@@ -67,6 +67,8 @@ export function fmtHz(f: number): string {
 }
 
 export const dbToLin = (db: number) => Math.pow(10, db / 20);
+/** Ganancia que aplica un fader: −∞ (≤ −89,5 dB) es silencio real. Misma regla en el motor y en las pruebas. */
+export const faderGain = (db: number) => (db <= -89.5 ? 0 : dbToLin(db));
 export const linToDb = (x: number) => (x <= 1e-5 ? FLOOR : 20 * Math.log10(x));
 
 export const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;

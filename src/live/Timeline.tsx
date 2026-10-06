@@ -62,6 +62,7 @@ export function Timeline({ edit }: { edit?: boolean }) {
           </select>
         </label>
       </div>
+      <div className="tl-scroll" tabIndex={-1}>
       <div className="tl-track">
         <span className="tl-flag start">Inicio</span>
         {song.arr.map((it, i) => {
@@ -70,16 +71,21 @@ export function Timeline({ edit }: { edit?: boolean }) {
           return (
             <div key={i} className={`tl-seg${on ? ' on' : ''}`} style={{ flexGrow: it.bars, ['--sc' as string]: KIND_COLOR[sec?.kind ?? 'otro'] }}>
               <button className="tl-name" onClick={() => goScene(it.scene)} title={`Ir a ${sec?.label}`}>{sec?.label ?? '?'}</button>
+              {edit || on ? (
               <span className="tl-bars">
                 <button aria-label="Menos compases" disabled={!canMusic || it.bars <= 1} onClick={() => d({ type: 'bars', index: i, bars: it.bars - 1 })}>−</button>
                 <b>{it.bars}</b>
                 <button aria-label="Más compases" disabled={!canMusic || it.bars >= 64} onClick={() => d({ type: 'bars', index: i, bars: it.bars + 1 })}>+</button>
               </span>
+              ) : (
+                <small className="tl-count" title={`${it.bars} compases`}>{it.bars}</small>
+              )}
             </div>
           );
         })}
         <span className="tl-flag end">Fin</span>
         <div ref={head} className="tl-head" aria-hidden="true" />
+      </div>
       </div>
       {edit && (
         <div className="arr-edit">
