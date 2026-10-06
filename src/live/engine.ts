@@ -1,9 +1,11 @@
-import type { Bus, Chan, ChId, EndAction, Fx, InId, InputCfg, Outputs, PlayMode, SamplerCfg, SceneMix, Section, SectionKind, SrcMode, Stem, Style, TimeSig } from './types';
-import { CH_IDS, IN_IDS, INST_IDS, MONITOR_ONLY, isMusical } from './types';
+import type { Bus, Chan, ChId, Clip, EndAction, Fx, InId, InputCfg, Outputs, PlayMode, Project, SamplerCfg, SceneMix, Section, SectionKind, SrcMode, Style, TimeSig } from './types';
+import { CH_IDS, IN_IDS, MONITOR_ONLY, isMusical } from './types';
 import { GROOVES, PERC, PERC_HITS, at } from './rhythm';
 import type { Hit } from './rhythm';
 import { meterBus } from '../meterEngine';
 import { FLOOR, dbToLin, faderGain } from '../util';
+import { DECLICK, emptyProject, envelopeAt, locate, planFrom, stepStart } from './studio/model';
+import { computePeaks, peaksStore } from './studio/peaks';
 
 /*
  * Motor de audio único de SONIDO (Web Audio API). Ver docs/FLUJO-AUDIO.md.
@@ -61,7 +63,10 @@ export interface EngineInfo {
   mode: PlayMode;
   end: EndAction;
   src: Record<'pad' | 'drums', SrcMode>;
-  stemsOnly: boolean;
+  /** Acompañamiento automático (ritmos y partes sintetizadas). No afecta a lo que se toca en vivo ni al click. */
+  accomp: boolean;
+  /** Compases de cuenta antes de arrancar (solo click). */
+  countIn: number;
 }
 
 export interface ApplyInput {
@@ -80,6 +85,8 @@ export interface Position {
   beats: number;
   songBar: number;
   pending: number | null;
+  /** Posición en el proyecto (s): la misma para Inicio, Multitrack y las tablets. */
+  pos: number;
 }
 
 const mtof = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
@@ -109,7 +116,7 @@ class Engine {
   ctx: AudioContext | null = null;
   /** En un cliente remoto el motor no suena: el audio lo produce solo el equipo anfitrión. */
   disabled = false;
-  info: EngineInfo = { bpm: 68, key: 9, ts: '4/4', rhodes: false, drawbars: [8, 8, 6, 0, 0, 0, 0, 0, 0], style: 'worship', arr: [{ scene: 'verso', bars: 8 }], kinds: { verso: 'verso' }, mode: 'follow', end: 'stop', src: { pad: 'synth', drums: 'synth' }, stemsOnly: false };
+  info: EngineInfo = { bpm: 68, key: 9, ts: '4/4', rhodes: false, drawbars: [8, 8, 6, 0, 0, 0, 0, 0, 0], style: 'worship', arr: [{ scene: 'verso', bars: 8 }], kinds: { verso: 'verso' }, mode: 'follow', end: 'stop', src: { pad: 'synth', drums: 'synth' }, accomp: true, countIn: 0 };
   playing = false;
   onState: (() => void) | null = null;
   onSection: ((sec: number) => void) | null = null;
@@ -159,11 +166,20 @@ class Engine {
   private songBar = 0;
   private pending: number | null = null;
   private stopAt: number | null = null;
-  private bars: { t: number; sec: number; bar: number; songBar: number }[] = [];
+  private bars: { t: number; sec: number; bar: number; songBar: number; pos: number }[] = [];
+  /** Posición del proyecto donde se reanuda o arranca (s). */
+  private resumeAt = 0;
   private files: Partial<Record<ChId, { buf: AudioBuffer; src: AudioBufferSourceNode | null; offset: number; start: number }>> = {};
-  private stems: Stem[] = [];
-  private stemBufs = new Map<string, AudioBuffer>();
-  private stemNodes = new Map<string, { src: AudioBufferSourceNode; gain: GainNode }>();
+  private project: Project = emptyProject();
+  private audio = new Map<string, AudioBuffer>();
+  private tracks = new Map<string, { gain: GainNode; pan: StereoPannerNode; pfl: GainNode; an: AnalyserNode; route: string }>();
+  /** Fuentes del proyecto en curso; cada arranque es una «generación» con su propio fundido anti-clic. */
+  private clipSrc: { src: AudioBufferSourceNode; gen: GainNode }[] = [];
+  private clipGens: GainNode[] = [];
+  private clipsT0 = 0;
+  private clipsPos = 0;
+  private clipsOn = false;
+  private preview: { src: AudioBufferSourceNode; g: GainNode } | null = null;
   private sampleBufs = new Map<string, AudioBuffer>();
   private sampler: SamplerCfg = { zones: [], attack: 0.005, release: 0.35 };
   private drone: Handle[] = [];
@@ -385,7 +401,6 @@ class Engine {
       if (isMusical(id)) {
         const m = mix.music[id];
         g = m && m.on ? lin(m.db) : 0;
-        if (this.info.stemsOnly && INST_IDS.includes(id)) g = 0;
         if (EXPR_CH.includes(id)) g *= expr;
       }
       set(n.input.gain, g);
@@ -965,16 +980,51 @@ class Engine {
     this.barInSec = 0;
     this.songBar = this.info.arr.slice(0, this.sec).reduce((a, x) => a + x.bars, 0);
     this.step = 0;
+    this.resumeAt = stepStart(this.info.arr, this.sec, this.barSec());
   }
 
-  play() {
+  private barSec() {
+    return meter(this.info.ts, this.info.bpm).bar;
+  }
+
+  /**
+   * Arranca el transporte único en la posición guardada (inicio, sección elegida, pausa o búsqueda).
+   * Si la posición cae a mitad de compás, el secuenciador entra en el paso que corresponde y el audio
+   * del proyecto arranca exactamente ahí: reanudar no salta al principio del compás.
+   */
+  play(countIn = this.info.countIn) {
     const c = this.ensure();
     if (!c || this.playing) return;
+    const m = meter(this.info.ts, this.info.bpm);
+    const arr = this.info.arr;
+    const P = this.resumeAt;
+    const loc = locate(arr, P, m.bar);
+    this.sec = loc.index;
+    this.barInSec = loc.bar;
+    this.songBar = arr.slice(0, loc.index).reduce((a, x) => a + x.bars, 0) + loc.bar;
     this.playing = true;
     this.stopAt = null;
+    this.pending = null;
     this.bars = [];
-    this.step = 0;
-    this.nextTime = c.currentTime + 0.1;
+    const lead = c.currentTime + 0.1;
+    const count = Math.max(0, Math.round(countIn));
+    // Cuenta: solo click, en el canal de click (monitores), antes de que empiece la música.
+    for (let b = 0; b < count; b++) m.beats.forEach((st, i) => this.voice('click', i === 0 ? 96 : 84, lead + b * m.bar + st * m.step, i === 0 ? 1 : 0.7));
+    const T0 = lead + count * m.bar;
+    const within = loc.within;
+    if (within < 1e-4) {
+      this.step = 0;
+      this.nextTime = T0;
+    } else {
+      const stepIn = Math.floor(within / m.step + 1e-6);
+      const frac = within - stepIn * m.step;
+      this.step = frac < 1e-4 ? stepIn : stepIn + 1;
+      this.nextTime = T0 + (frac < 1e-4 ? 0 : m.step - frac);
+      this.bars.push({ t: T0 - within, sec: this.sec, bar: this.barInSec, songBar: this.songBar, pos: P - within });
+      this.startClips(T0, P, false);
+      const sec = this.sec;
+      window.setTimeout(() => this.onSection?.(sec), Math.max(0, (T0 - c.currentTime) * 1000));
+    }
     this.timer = window.setInterval(() => this.tick(), 25);
     this.startFiles();
     this.onState?.();
@@ -982,14 +1032,16 @@ class Engine {
 
   pause() {
     if (!this.playing) return;
+    this.resumeAt = this.projectTime();
     this.playing = false;
     window.clearInterval(this.timer);
     for (const id of Object.keys(this.files) as ChId[]) this.stopFile(id, true);
-    this.stopStems();
+    this.stopClips(this.ctx ? this.ctx.currentTime + DECLICK : 0, true);
     this.releaseAll(0.15);
     this.onState?.();
   }
 
+  /** Detiene las pistas y vuelve al inicio. No toca micrófonos, master ni notas tocadas en vivo. */
   stop() {
     this.pause();
     this.setSection(0);
@@ -997,6 +1049,31 @@ class Engine {
     this.pending = null;
     this.bars = [];
     this.onState?.();
+  }
+
+  /** Va a una posición del proyecto. Sonando, reconstruye todas las fuentes juntas en el nuevo punto. */
+  seek(pos: number) {
+    const was = this.playing;
+    if (was) this.pause();
+    const m = meter(this.info.ts, this.info.bpm);
+    this.resumeAt = Math.max(0, pos);
+    const loc = locate(this.info.arr, this.resumeAt, m.bar);
+    this.sec = loc.index;
+    this.barInSec = loc.bar;
+    this.songBar = this.info.arr.slice(0, loc.index).reduce((a, x) => a + x.bars, 0) + loc.bar;
+    this.onSection?.(loc.index);
+    if (was) this.play(0);
+    else this.onState?.();
+  }
+
+  /** Posición actual del proyecto en segundos (sonando: según el reloj de audio). */
+  projectTime(): number {
+    if (!this.ctx || !this.playing) return this.resumeAt;
+    const now = this.ctx.currentTime;
+    let cur: (typeof this.bars)[number] | undefined;
+    for (const b of this.bars) if (b.t <= now) cur = b;
+    if (!cur) return this.resumeAt;
+    return cur.pos + (now - cur.t);
   }
 
   /** Panic: suelta todas las voces musicales y el fondo. No silencia micrófonos ni la sala. */
@@ -1010,18 +1087,18 @@ class Engine {
 
   position(): Position {
     const m = meter(this.info.ts, this.info.bpm);
-    const base = { sec: this.sec, bar: this.barInSec, beat: 0, beats: m.beats.length, songBar: this.songBar, pending: this.pending };
+    const base = { sec: this.sec, bar: this.barInSec, beat: 0, beats: m.beats.length, songBar: this.songBar, pending: this.pending, pos: this.projectTime() };
     if (!this.ctx || !this.playing) return base;
     const now = this.ctx.currentTime;
     let cur = this.bars[0];
     for (const b of this.bars) if (b.t <= now) cur = b;
-    if (!cur) return base;
+    if (!cur || cur.t > now) return base;
     const stepIn = Math.max(0, Math.floor((now - cur.t) / m.step));
     let beat = 0;
     m.beats.forEach((b, i) => {
       if (stepIn >= b) beat = i;
     });
-    return { sec: cur.sec, bar: cur.bar, beat, beats: m.beats.length, songBar: cur.songBar, pending: this.pending };
+    return { sec: cur.sec, bar: cur.bar, beat, beats: m.beats.length, songBar: cur.songBar, pending: this.pending, pos: base.pos };
   }
 
   private releaseAll(after: number) {
@@ -1052,7 +1129,6 @@ class Engine {
     const arr = this.info.arr;
     if (!arr.length) return;
     let changed = false;
-    let restartStems = this.step === 0;
     if (this.step > 0) {
       this.barInSec++;
       this.songBar++;
@@ -1060,7 +1136,7 @@ class Engine {
         this.sec = Math.min(this.pending, arr.length - 1);
         this.barInSec = 0;
         this.pending = null;
-        changed = restartStems = true;
+        changed = true;
       } else if (this.barInSec >= arr[this.sec].bars) {
         this.barInSec = 0;
         if (this.info.mode === 'follow') {
@@ -1069,10 +1145,10 @@ class Engine {
           if (this.sec >= arr.length) {
             const end = this.info.end;
             this.sec = 0;
-            restartStems = true;
             const delay = Math.max(0, (t - this.ctx!.currentTime) * 1000);
             if (end === 'stop') {
               this.stopAt = t;
+              this.stopClips(t, true);
               window.setTimeout(() => {
                 this.stop();
                 this.onEnd?.('stop');
@@ -1082,7 +1158,7 @@ class Engine {
             window.setTimeout(() => this.onEnd?.(end), delay);
           }
         } else {
-          changed = restartStems = true; // repetir sección: las pistas vuelven al inicio de la sección
+          changed = true; // repetir sección: las pistas vuelven al inicio de la sección
         }
       }
     } else changed = true;
@@ -1094,8 +1170,13 @@ class Engine {
       const kind = this.info.kinds[arr[sec].scene] ?? 'verso';
       if (kind !== 'intro' && !LATIN.includes(this.info.style) && this.step > 0) this.hit('crash', t, 0.7);
     }
-    if (restartStems) this.startStems(t, this.songBar * barDur);
-    this.bars.push({ t, sec: this.sec, bar: this.barInSec, songBar: this.songBar });
+    // Audio del proyecto: posición del paso actual (marcador o compases acumulados). Si no coincide con lo que ya
+    // suena (salto, repetición, inicio), todas las pistas se reconstruyen juntas en este mismo instante del reloj.
+    const pos = stepStart(arr, this.sec, barDur) + this.barInSec * barDur;
+    const expected = this.clipsPos + (t - this.clipsT0);
+    const jump = Math.abs(expected - pos) > 0.002;
+    if (!this.clipsOn || jump) this.startClips(t, pos, this.clipsOn && jump);
+    this.bars.push({ t, sec: this.sec, bar: this.barInSec, songBar: this.songBar, pos });
   }
 
   private schedule(p: number, t: number, m: ReturnType<typeof meter>) {
@@ -1118,6 +1199,11 @@ class Engine {
     const onBeat = m.beats.includes(p);
     const bar = m.steps * S;
 
+    // Sin acompañamiento automático solo suena el click (monitores). Lo tocado en vivo no pasa por aquí.
+    if (!this.info.accomp) {
+      if (onBeat) this.voice('click', p === 0 ? 96 : 84, t, p === 0 ? 1 : 0.7);
+      return;
+    }
     // Piano
     if (m.simple44 && groove.comp && K !== 'intro') {
       if (at(groove.comp, local)) n('piano', [r + 12, th + 12, fi + 12], S * 1.6, 0.7, 0.006);
@@ -1257,60 +1343,220 @@ class Engine {
     f.src = null;
   }
 
-  /* ---------- Multitrack: stems alineados al reloj de audio ---------- */
+  /* ---------- Proyecto multitrack: clips alineados al reloj de audio ---------- */
 
-  setStems(stems: Stem[]) {
-    this.stems = stems;
-    const c = this.ctx;
-    if (!c) return;
-    for (const st of stems) {
-      const nd = this.stemNodes.get(st.id);
-      if (nd) nd.gain.gain.setTargetAtTime(st.mute ? 0 : lin(st.db), c.currentTime, 0.03);
-    }
-  }
-
-  async loadStem(asset: string, data: ArrayBuffer): Promise<number> {
+  /** Decodifica un archivo del proyecto y calcula sus picos reales. */
+  async loadAudio(asset: string, data: ArrayBuffer): Promise<{ duration: number; channels: number; sampleRate: number }> {
     const c = this.ensure();
     if (!c) throw new Error('sin-motor');
     const buf = await c.decodeAudioData(data.slice(0));
-    this.stemBufs.set(asset, buf);
-    return buf.duration;
+    this.audio.set(asset, buf);
+    peaksStore.set(asset, computePeaks(buf));
+    return { duration: buf.duration, channels: buf.numberOfChannels, sampleRate: buf.sampleRate };
   }
 
-  stemReady(asset: string) {
-    return this.stemBufs.has(asset);
+  hasAudio(asset: string) {
+    return this.audio.has(asset);
   }
 
-  /** Arranca todos los stems en el mismo instante `t` del reloj de audio, en la posición `pos` (segundos desde el compás 1). */
-  private startStems(t: number, pos: number) {
-    const c = this.ctx!;
-    this.stopStems(t);
-    for (const st of this.stems) {
-      const buf = this.stemBufs.get(st.asset);
-      if (!buf) continue;
-      const local = pos - st.offset;
-      if (local >= buf.duration) continue; // stem más corto: ya terminó
-      const src = c.createBufferSource();
-      src.buffer = buf;
-      const gain = c.createGain();
-      gain.gain.value = st.mute ? 0 : lin(st.db);
-      // Click y guía entran por el canal de click: nunca llegan a la sala.
-      src.connect(gain).connect(this.ch[st.cat === 'click' || st.cat === 'guia' ? 'click' : 'tracks'].dest);
-      if (local >= 0) src.start(t, local);
-      else src.start(t - local, 0);
-      this.stemNodes.set(st.id, { src, gain });
+  /** El búfer decodificado de un activo (pruebas y vista previa). */
+  bufferOf(asset: string) {
+    return this.audio.get(asset) ?? null;
+  }
+
+  /** Registra un búfer ya creado (pruebas con señales deterministas). */
+  putAudio(asset: string, buf: AudioBuffer) {
+    this.audio.set(asset, buf);
+    peaksStore.set(asset, computePeaks(buf));
+  }
+
+  /**
+   * Proyecto nuevo (pistas, clips, niveles). Si cambian clips o pistas mientras suena, todas las fuentes se
+   * reconstruyen juntas desde la posición actual, para que lo que se ve y lo que suena coincidan.
+   */
+  setProject(p: Project) {
+    const prev = this.project;
+    this.project = p;
+    const c = this.ctx;
+    if (!c) return;
+    const t = c.currentTime;
+    for (const tr of p.tracks) {
+      let n = this.tracks.get(tr.id);
+      if (n && n.route !== tr.route) {
+        n.pan.disconnect();
+        n.pan.connect(this.ch[tr.route].dest);
+        n.route = tr.route;
+      }
+      if (!n) {
+        const gain = c.createGain();
+        const pan = c.createStereoPanner();
+        const pfl = c.createGain();
+        const an = c.createAnalyser();
+        an.fftSize = 1024;
+        pfl.gain.value = 0;
+        gain.connect(pan).connect(this.ch[tr.route].dest);
+        gain.connect(an);
+        // Escucha (PFL) de la pista: a la escucha del operador; la sala no cambia.
+        gain.connect(pfl).connect(this.cueIn);
+        n = { gain, pan, pfl, an, route: tr.route };
+        this.tracks.set(tr.id, n);
+      }
+      n.gain.gain.setTargetAtTime(tr.mute ? 0 : lin(tr.db), t, 0.02);
+      n.pan.pan.setTargetAtTime(tr.pan / 100, t, 0.02);
+      n.pfl.gain.setTargetAtTime(tr.solo ? 1 : 0, t, 0.02);
+    }
+    for (const [id, n] of this.tracks) {
+      if (p.tracks.some((x) => x.id === id)) continue;
+      n.gain.disconnect();
+      n.pan.disconnect();
+      n.pfl.disconnect();
+      this.tracks.delete(id);
+    }
+    const struct = (q: Project) => JSON.stringify([q.clips, q.tracks.map((x) => [x.id, x.route])]);
+    if (this.playing && this.clipsOn && struct(prev) !== struct(p)) {
+      const at = c.currentTime + 0.05;
+      this.startClips(at, this.clipsPos + (at - this.clipsT0), true);
     }
   }
 
-  private stopStems(at?: number) {
-    this.stemNodes.forEach(({ src }) => {
+  /**
+   * Arranca todas las fuentes del proyecto en el mismo instante `t` del reloj, en la posición `pos`.
+   * Los AudioBufferSourceNode son de un solo uso: cada arranque, pausa, búsqueda o salto crea fuentes nuevas.
+   * `jump`: la posición no continúa la anterior; la generación vieja baja y la nueva sube en 5 ms (sin clic).
+   */
+  private startClips(t: number, pos: number, jump: boolean) {
+    const c = this.ctx;
+    if (!c) return;
+    this.stopClips(t, jump);
+    const gens = new Map<string, GainNode>();
+    for (const it of planFrom(this.project, pos)) {
+      const buf = this.audio.get(it.clip.asset);
+      const tn = this.tracks.get(it.clip.track);
+      if (!buf || !tn || it.srcOff >= buf.duration) continue;
+      let gen = gens.get(it.clip.track);
+      if (!gen) {
+        gen = c.createGain();
+        if (jump) {
+          gen.gain.setValueAtTime(0, t);
+          gen.gain.linearRampToValueAtTime(1, t + DECLICK);
+        }
+        gen.connect(tn.gain);
+        gens.set(it.clip.track, gen);
+      }
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      const g = c.createGain();
+      this.envelope(g.gain, it.clip, pos + it.delay, t + it.delay, it.dur);
+      src.connect(g).connect(gen);
+      src.start(t + it.delay, it.srcOff, Math.min(it.dur, buf.duration - it.srcOff));
+      this.clipSrc.push({ src, gen });
+    }
+    this.clipGens = [...gens.values()];
+    this.clipsT0 = t;
+    this.clipsPos = pos;
+    this.clipsOn = true;
+  }
+
+  /** Ganancia del clip con sus fundidos, programada desde el punto `s0` del proyecto que suena en `t0`. */
+  private envelope(p: AudioParam, clip: Clip, s0: number, t0: number, dur: number) {
+    const g = lin(clip.gain);
+    const at = (s: number) => t0 + (s - s0);
+    p.setValueAtTime(envelopeAt(clip, s0) * g, t0);
+    const fiEnd = clip.pos + clip.fadeIn;
+    if (clip.fadeIn > 0 && s0 < fiEnd) p.linearRampToValueAtTime(envelopeAt(clip, fiEnd) * g, at(fiEnd));
+    const end = s0 + dur;
+    const foStart = clip.pos + clip.len - clip.fadeOut;
+    if (clip.fadeOut > 0) {
+      if (s0 < foStart) p.setValueAtTime(envelopeAt(clip, foStart) * g, at(foStart));
+      p.linearRampToValueAtTime(0, at(end));
+    }
+  }
+
+  private stopClips(at: number, fade: boolean) {
+    const c = this.ctx;
+    if (!c) return;
+    const when = Math.max(at, c.currentTime);
+    if (fade) {
+      for (const gen of this.clipGens) {
+        gen.gain.setValueAtTime(1, Math.max(c.currentTime, when - DECLICK));
+        gen.gain.linearRampToValueAtTime(0, when);
+      }
+    }
+    for (const { src } of this.clipSrc) {
       try {
-        src.stop(at);
+        src.stop(when + (fade ? 0.002 : 0));
       } catch {
         /* ya detenido */
       }
-    });
-    this.stemNodes.clear();
+    }
+    this.clipSrc = [];
+    this.clipGens = [];
+    this.clipsOn = false;
+  }
+
+  /** Muestras recientes de la salida de un canal (después del fader y el pan): para pruebas de alineación. */
+  probe(id: ChId): Float32Array {
+    const an = this.ch[id]?.an;
+    const d = new Float32Array(an?.fftSize ?? 0);
+    an?.getFloatTimeDomainData(d);
+    return d;
+  }
+
+  /** Nivel de pico reciente de una pista (dB), para su cabecera. */
+  trackLevel(id: string): number {
+    const n = this.tracks.get(id);
+    if (!n) return FLOOR;
+    const d = new Float32Array(n.an.fftSize);
+    n.an.getFloatTimeDomainData(d);
+    let pk = 0;
+    for (const v of d) pk = Math.max(pk, Math.abs(v));
+    return pk > 0 ? Math.max(FLOOR, 20 * Math.log10(pk)) : FLOOR;
+  }
+
+  /* ---------- Preescucha: dominio aparte, por la escucha del operador ---------- */
+
+  /** ¿La escucha tiene una salida física propia, distinta de la sala? */
+  cueSeparate(): boolean {
+    const o = this.last?.outputs;
+    const n = this.ctx?.destination.maxChannelCount ?? 2;
+    return !!o && n >= 4 && o.cue >= 0 && o.cue !== o.main;
+  }
+
+  /**
+   * Reproduce un archivo para elegir material. Va a la escucha; solo va a la sala si `toRoom` (el usuario
+   * lo eligió de forma explícita porque no hay salida de escucha). Nunca pasa por el master ni la grabación.
+   */
+  previewStart(asset: string, from = 0, toRoom = false): boolean {
+    const c = this.ensure();
+    const buf = this.audio.get(asset);
+    if (!c || !buf) return false;
+    this.previewStop();
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    const g = c.createGain();
+    g.gain.value = 0.8;
+    src.connect(g).connect(toRoom ? this.mainPort : this.cuePort);
+    src.start(c.currentTime + 0.02, Math.max(0, Math.min(from, buf.duration - 0.01)));
+    src.onended = () => {
+      if (this.preview?.src === src) this.preview = null;
+    };
+    this.preview = { src, g };
+    return true;
+  }
+
+  previewStop() {
+    if (!this.preview) return;
+    try {
+      this.preview.src.stop();
+    } catch {
+      /* ya detenido */
+    }
+    this.preview.g.disconnect();
+    this.preview = null;
+  }
+
+  get previewing() {
+    return !!this.preview;
   }
 
   /* ---------- Grabación ---------- */

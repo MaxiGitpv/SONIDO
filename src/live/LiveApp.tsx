@@ -8,14 +8,21 @@ import { posToDb } from '../util';
 import { liveInit, liveReducer } from './store';
 import type { LAction } from './store';
 import { CH_META, KEY_SEMI } from './data';
-import type { ChId, InId, InputCfg, SceneId, Stem, StemCat, Tab, View } from './types';
+import type { AssetInfo, ChId, Clip, InId, InputCfg, SceneId, StemCat, Tab, Track, View } from './types';
 import { IN_IDS } from './types';
 import { engine } from './engine';
 import { Repertoire, SoundBank } from './Left';
 import { ChannelFx, PlayPanel, SceneBar, SongHeader } from './Center';
 import { Expand } from './nav';
 import { ChannelPage, FxPage, InputsPage, PlayPage, ScenesPage } from './Pages';
-import { BusesPage, MixScenesPage, NetworkPage, OutputsPage, StemsPage } from './Pages2';
+import { BusesPage, MixScenesPage, NetworkPage, OutputsPage } from './Pages2';
+import { Studio } from './studio/Studio';
+import { missingAssets, newTrack, uid, stepStart } from './studio/model';
+import { fromWire, peaksStore, toWire } from './studio/peaks';
+import type { PeaksWire } from './studio/peaks';
+import type { TransportInfo } from './net';
+import type { TransportOp } from './ctx';
+import { meter } from './engine';
 import { StripRow } from './Strips';
 import { RightPanel } from './Right';
 import { Footer } from './Footer';
@@ -138,13 +145,13 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
   useEffect(() => {
     engine.info = {
       bpm: song.bpm, key: KEY_SEMI[song.key] ?? 0, ts: song.ts, rhodes: music.sound === 'rhodes', drawbars: s.fx.drawbars, style: song.style, arr: song.arr,
-      kinds: Object.fromEntries(song.sections.map((x) => [x.id, x.kind])), mode: s.playMode, end: song.end, src: s.src, stemsOnly: song.stemsOnly && song.stems.length > 0,
+      kinds: Object.fromEntries(song.sections.map((x) => [x.id, x.kind])), mode: s.playMode, end: song.end, src: s.src, accomp: song.project.accomp, countIn: song.project.countIn,
     };
     engine.apply({ mix, fx: s.fx, master: s.master, masterMute: s.masterMute, buses: s.buses, outputs: s.outputs });
   }, [mix, music.sound, s.fx, s.master, s.masterMute, song, s.playMode, s.src, s.buses, s.outputs]);
   useEffect(() => engine.syncSources(), [s.src]);
   useEffect(() => engine.setSampler(s.sampler), [s.sampler]);
-  useEffect(() => engine.setStems(song.stems), [song.stems]);
+  useEffect(() => engine.setProject(song.project), [song.project, audioOn]);
 
   const lastIn = useRef<Partial<Record<InId, string>>>({});
   useEffect(() => {
@@ -195,12 +202,18 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
   }, [s.toast?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------- Activos de audio: precarga desde IndexedDB antes de tocar ---------- */
-  const loadAsset = useCallback(async (id: string, kind: 'stem' | 'sample' | ChId) => {
+  const loadAsset = useCallback(async (id: string, kind: 'audio' | 'sample' | ChId) => {
     setAssets((a) => ({ ...a, [id]: 'loading' }));
     const r = await getAsset(id);
     if (!r) return setAssets((a) => ({ ...a, [id]: 'missing' }));
     try {
-      if (kind === 'stem') await engine.loadStem(id, r.data);
+      if (kind === 'audio') {
+        const info = await engine.loadAudio(id, r.data);
+        // Integridad: si el archivo guardado no coincide con lo que el proyecto esperaba, se avisa.
+        const known = ref.current.song.project.assets[id];
+        if (known && known.duration > 0 && Math.abs(known.duration - info.duration) > 0.05) dRaw({ type: 'toast', text: `«${known.name}» cambió de duración (${known.duration.toFixed(2)} → ${info.duration.toFixed(2)} s): revise la alineación` });
+        if (!known || !known.channels) dRaw({ type: 'proj', op: { k: 'asset', id, info: { name: known?.name ?? r.meta.name, duration: info.duration, channels: info.channels, sampleRate: info.sampleRate, bytes: r.meta.bytes } } });
+      }
       else if (kind === 'sample') await engine.loadSample(id, r.data);
       else {
         await engine.loadFile(kind, r.data);
@@ -213,9 +226,19 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
   }, []);
   useEffect(() => {
     if (!audioOn || remote) return;
-    for (const st of song.stems) if (!assets[st.asset]) void loadAsset(st.asset, 'stem');
+    for (const c of song.project.clips) if (!assets[c.asset]) void loadAsset(c.asset, 'audio');
     for (const z of s.sampler.zones) if (!assets[z.asset]) void loadAsset(z.asset, 'sample');
-  }, [audioOn, song.stems, s.sampler.zones, remote]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioOn, song.project.clips, s.sampler.zones, remote]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Tablets: no decodifican audio; piden al anfitrión los picos reducidos para dibujar las formas de onda.
+  useEffect(() => {
+    if (!remote) return;
+    for (const asset of new Set(song.project.clips.map((c) => c.asset))) {
+      if (peaksStore.get(asset)) continue;
+      void net.request('peaks', asset).then((r) => {
+        if (r.ok && r.data) peaksStore.set(asset, fromWire(r.data as PeaksWire));
+      });
+    }
+  }, [remote, song.project.clips]);
   useEffect(() => {
     if (!audioOn || remote) return;
     void listAssets().then((list) => {
@@ -247,21 +270,35 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
     }
   }, [d, storeFile]);
 
+  /**
+   * Importa archivos al proyecto: una pista y un clip por archivo, en el cero del proyecto. Los archivos de una
+   * misma importación forman un grupo de alineación (stems de una exportación). La importación ocurre en el
+   * anfitrión: una tablet no envía audio.
+   */
   const addStems = useCallback(async (files: File[]) => {
+    if (isRemoteNow()) return dRaw({ type: 'toast', text: 'Importe los audios en el equipo anfitrión: las tablets solo controlan.' });
+    const tracks: Track[] = [];
+    const clips: Clip[] = [];
+    const infos: Record<string, AssetInfo> = {};
+    const group = files.length > 1 ? uid('g') : undefined;
     for (const f of files) {
       const id = newAssetId();
       setAssets((a) => ({ ...a, [id]: 'loading' }));
       try {
-        const dur = await engine.loadStem(id, await f.arrayBuffer());
-        await storeFile(id, f);
-        const stem: Stem = { id: `st${id}`, name: f.name.replace(/\.[^.]+$/, ''), cat: stemCatFromName(f.name), asset: id, db: 0, mute: false, offset: 0, duration: dur };
-        d({ type: 'stemAdd', stem });
-        setAssets((a) => ({ ...a, [id]: 'ready' }));
+        const info = await engine.loadAudio(id, await f.arrayBuffer());
+        const saved = await storeFile(id, f);
+        const name = f.name.replace(/\.[^.]+$/, '');
+        const t = newTrack(name, stemCatFromName(f.name));
+        tracks.push(t);
+        clips.push({ id: uid('c'), track: t.id, asset: id, pos: 0, off: 0, len: info.duration, gain: 0, fadeIn: 0, fadeOut: 0, group });
+        infos[id] = { name, duration: info.duration, channels: info.channels, sampleRate: info.sampleRate, bytes: f.size };
+        setAssets((a) => ({ ...a, [id]: saved ? 'ready' : 'session' }));
       } catch {
         setAssets((a) => ({ ...a, [id]: 'error' }));
         dRaw({ type: 'toast', text: `No se pudo decodificar «${f.name}»` });
       }
     }
+    if (tracks.length) d({ type: 'proj', op: { k: 'addAudio', tracks, clips, assets: infos } });
   }, [d, storeFile]);
 
   const addSamples = useCallback(async (files: File[]) => {
@@ -283,6 +320,16 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
 
   /* ---------- Transporte, secciones y notas ---------- */
   const isRemoteNow = () => ref.current.netState.status === 'on' && !ref.current.netState.host;
+  const remoteTp = useRef<(TransportInfo & { at: number }) | null>(null);
+  const tpNow = useCallback((): TransportInfo => {
+    if (isRemoteNow()) {
+      const r = remoteTp.current;
+      if (!r) return { playing: false, pos: 0, sec: 0, pending: null };
+      return { ...r, pos: r.pos + (r.playing ? (performance.now() - r.at) / 1000 : 0) };
+    }
+    const p = engine.position();
+    return { playing: engine.playing, pos: p.pos, sec: p.sec, pending: p.pending };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const goScene = useCallback((scene: SceneId) => {
     if (isRemoteNow()) return void net.command({ type: 'transport', op: 'goto', scene });
@@ -297,14 +344,40 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
     }
   }, []);
 
-  const transport = useCallback((op: 'play' | 'pause' | 'stop') => {
-    if (isRemoteNow()) return void net.command({ type: 'transport', op });
+  /**
+   * Transporte único (Inicio, Multitrack, MIDI y tablets usan este mismo). Detener solo para las pistas y el
+   * acompañamiento: micrófonos, master y notas tocadas en vivo siguen; Panic es aparte.
+   */
+  const transport = useCallback((op: TransportOp, arg?: number) => {
+    if (isRemoteNow()) return void net.command({ type: 'transport', op, arg });
+    const sg = ref.current.song;
+    const bar = meter(sg.ts, sg.bpm).bar;
+    if ((op === 'play' || (op === 'toggle' && !engine.playing)) && !engine.playing) {
+      // Aviso antes de arrancar si faltan archivos del proyecto (el estudio además pide confirmación).
+      const miss = missingAssets(sg.project, (a) => engine.hasAudio(a));
+      if (miss.length && engine.ready) dRaw({ type: 'toast', text: `Faltan ${miss.length} archivo(s) del multitrack: ${miss.map((x) => x.name).join(', ')}. Esas pistas no sonarán.` });
+    }
     if (op === 'play') engine.play();
     else if (op === 'pause') engine.pause();
-    else {
+    else if (op === 'toggle') {
+      if (engine.playing) engine.pause();
+      else engine.play();
+    } else if (op === 'stop') {
       engine.stop();
-      const sg = ref.current.song;
       dRaw({ type: 'scene', id: sg.arr[0]?.scene ?? sg.sections[0].id });
+    } else if (op === 'seek' && typeof arg === 'number') engine.seek(arg);
+    else if (op === 'from' && typeof arg === 'number') {
+      // Iniciar desde un paso del orden: todas las pistas arrancan juntas en su inicio.
+      engine.seek(stepStart(sg.arr, arg, bar));
+      if (!engine.playing) engine.play();
+    } else if (op === 'jump' && typeof arg === 'number') {
+      // Saltar a un paso: sonando, entra en el próximo compás (todas las pistas juntas); detenido, se coloca.
+      if (engine.playing) engine.setSection(arg);
+      else engine.seek(stepStart(sg.arr, arg, bar));
+    } else if (op === 'end') {
+      const last = sg.arr.length - 1;
+      if (engine.playing) engine.setSection(last);
+      else engine.seek(stepStart(sg.arr, last, bar));
     }
   }, []);
 
@@ -517,7 +590,14 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
           break;
         case 'levels':
           setNetState((x) => ({ ...x, levels: m.levels }));
+          if (m.tp) remoteTp.current = { ...m.tp, at: performance.now() };
           break;
+        case 'req': {
+          if (!cur.netState.host) break;
+          const pk = peaksStore.get(m.asset);
+          net.send({ t: 'res', id: m.id, to: m.from, ok: !!pk, data: pk ? toWire(pk) : undefined, reason: pk ? undefined : 'archivo no cargado en el anfitrión' });
+          break;
+        }
         case 'host-left':
           setNetState((x) => ({ ...x, hostPresent: false }));
           dRaw({ type: 'toast', text: 'El equipo anfitrión se desconectó. Los controles quedan en espera hasta que vuelva.' });
@@ -542,7 +622,7 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
           writers.current.set(ckey, { who: m.from, t: now });
           if (a.type === ('transport' as LAction['type'])) {
             if (ex.op === 'goto' && ex.scene) handleRef.current.goScene(ex.scene);
-            else handleRef.current.transport(ex.op as 'play' | 'pause' | 'stop');
+            else handleRef.current.transport(ex.op as TransportOp, (m.action as { arg?: number }).arg);
           } else if (a.type === ('panic' as LAction['type'])) handleRef.current.panic();
           else dRaw(a);
           net.send({ t: 'ack', id: m.id, to: m.from, ok: true });
@@ -567,14 +647,22 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
       const lv = engine.levels();
       const small: Record<string, number> = {};
       for (const k of Object.keys(lv)) if (k.startsWith('live:') || k.startsWith('bus:') || k === 'mL' || k === 'mR') small[k] = lv[k];
-      net.send({ t: 'levels', levels: small });
+      const p = engine.position();
+      const tp: TransportInfo = { playing: engine.playing, pos: p.pos, sec: p.sec, pending: p.pending };
+      net.send({ t: 'levels', levels: small, tp });
     }, 200);
     return () => window.clearInterval(id);
   }, [netState.status, netState.host]);
 
+  // Pruebas de audio de punta a punta (scripts/verify-audio.mjs): solo con «?prueba» en la dirección.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('prueba')) return;
+    (window as unknown as Record<string, unknown>).__sonidoPrueba = { engine, d: dRaw, state: () => ref.current.s, song: () => ref.current.song, transport: (op: TransportOp, arg?: number) => handleRef.current.transport(op, arg) };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const ctx = useMemo<LiveCtxValue>(
-    () => ({ s, d, mix, audioOn, loadFile, goScene, midi, connectMidi, setLearn, rec, toggleRec, role, can, remote, song, assets, addStems, addSamples, netState, setNetState, transport, panic, save, profile }),
-    [s, d, mix, audioOn, loadFile, goScene, midi, connectMidi, setLearn, rec, toggleRec, role, can, remote, song, assets, addStems, addSamples, netState, transport, panic, save, profile],
+    () => ({ s, d, mix, audioOn, loadFile, goScene, midi, connectMidi, setLearn, rec, toggleRec, role, can, remote, song, assets, addStems, addSamples, netState, setNetState, transport, tpNow, panic, save, profile }),
+    [s, d, mix, audioOn, loadFile, goScene, midi, connectMidi, setLearn, rec, toggleRec, role, can, remote, song, assets, addStems, addSamples, netState, transport, tpNow, panic, save, profile],
   );
   const sr = engine.sampleRate;
   const lat = engine.latencySamples;
@@ -701,7 +789,7 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
               {s.tab === 'fx' && <FxPage />}
               {s.tab === 'inputs' && <InputsPage />}
               {s.tab === 'sounds' && <SoundsView />}
-              {s.tab === 'stems' && <StemsPage />}
+              {s.tab === 'stems' && <Studio />}
               {s.tab === 'mixer' && <MixerView />}
               {s.tab === 'buses' && <BusesPage />}
               {s.tab === 'outputs' && <OutputsPage />}

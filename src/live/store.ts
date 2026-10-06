@@ -1,9 +1,14 @@
-import type { Bus, Chan, ChId, EndAction, EqTab, Fx, InId, InputCfg, LiveState, Macros, MidiMap, MixScene, MusicLevel, Outputs, PlayMode, RecallMask, SampleZone, SamplerCfg, SceneId, SectionDef, SectionKind, Send, Song, SoundCat, SoundId, SrcMode, Stem, StripGroup, Style, Tab, View, Zone } from './types';
+import type { Bus, Chan, ChId, EndAction, EqTab, Fx, InId, InputCfg, LiveState, Macros, MidiMap, MixScene, MusicLevel, Outputs, PlayMode, RecallMask, SampleZone, SamplerCfg, SceneId, SectionDef, SectionKind, Send, Song, SoundCat, SoundId, SrcMode, StripGroup, Style, Tab, View, Zone } from './types';
 import { CH_IDS } from './types';
 import { BUS_COLORS, STYLE_BPM, applyLayers, defaultChan, layersFor, mixDataOf, musicScene, newSong, PRESETS } from './data';
 import { normalize } from './persist';
 import type { SavedData } from './persist';
 import { clone } from '../util';
+import type { Project } from './types';
+import { applyOp, isSetting } from './studio/ops';
+import type { ProjOp } from './studio/ops';
+import { arrFromMarkers } from './studio/model';
+import { meter } from './engine';
 
 export type LAction =
   | { type: 'tab'; tab: Tab }
@@ -44,14 +49,13 @@ export type LAction =
   | { type: 'secAdd'; label: string; kind: SectionKind }
   | { type: 'secEdit'; id: SceneId; patch: Partial<SectionDef> }
   | { type: 'secRemove'; id: SceneId }
-  | { type: 'arrAdd'; scene: SceneId; bars: number }
+  | { type: 'arrAdd'; scene: SceneId; bars: number; marker?: string; after?: number }
   | { type: 'arrRemove'; index: number }
   | { type: 'arrMove'; index: number; dir: 1 | -1 }
   | { type: 'arrScene'; index: number; scene: SceneId }
-  | { type: 'stemAdd'; stem: Stem }
-  | { type: 'stemEdit'; id: string; patch: Partial<Stem> }
-  | { type: 'stemRemove'; id: string }
-  | { type: 'stemsOnly'; on: boolean }
+  | { type: 'proj'; op: ProjOp }
+  | { type: 'projUndo' }
+  | { type: 'projRedo' }
   | { type: 'zoneAdd'; zone: SampleZone }
   | { type: 'zoneEdit'; id: string; patch: Partial<SampleZone> }
   | { type: 'zoneRemove'; id: string }
@@ -80,7 +84,13 @@ export type LAction =
   | { type: 'left'; open: boolean }
   | { type: 'toast'; text: string };
 
-export type LState = LiveState & { trash: MixScene | null };
+/** Historial de edición del proyecto de la canción actual (no se guarda ni se comparte). */
+export interface ProjHist {
+  song: string;
+  past: Project[];
+  future: Project[];
+}
+export type LState = LiveState & { trash: MixScene | null; hist?: ProjHist };
 
 export function liveInit(data: SavedData): LState {
   return {
@@ -98,6 +108,12 @@ const editScene = (s: LState, fn: (m: LState['mix'][string][string]) => LState['
 });
 const editSong = (s: LState, fn: (sg: Song) => Song): LState => ({ ...s, dirty: true, songs: s.songs.map((x) => (x.id === s.songId ? fn(x) : x)) });
 const editCh = (s: LState, id: ChId, fn: (c: Chan) => Chan): LState => ({ ...s, dirty: true, console: { ...s.console, [id]: fn(s.console[id]) } });
+/** Con marcadores, el orden de la canción sale del audio (y se conservan repeticiones y orden armados). */
+const withArr = (sg: Song): Song => {
+  const had = sg.arr.some((x) => x.marker);
+  if (!sg.project.markers.length && !had) return sg;
+  return { ...sg, arr: arrFromMarkers(sg.project, sg.arr, meter(sg.ts, sg.bpm).bar) };
+};
 const firstScene = (sg: Song) => sg.arr[0]?.scene ?? sg.sections[0].id;
 const slug = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'seccion';
 
@@ -210,9 +226,11 @@ export function liveReducer(s: LState, a: LAction): LState {
       const out = { ...s, midi, dirty: true };
       return clash ? say(out, `CC ${next.cc} estaba asignado a «${clash.label}»; esa función quedó sin asignar`) : out;
     }
-    case 'songEdit': return { ...s, songs: s.songs.map((x) => (x.id === a.id ? { ...x, ...a.patch } : x)), dirty: true };
+    case 'songEdit': return { ...s, songs: s.songs.map((x) => (x.id === a.id ? withArr({ ...x, ...a.patch }) : x)), dirty: true };
     case 'style': return say(editSong(s, (sg) => ({ ...sg, style: a.style, bpm: STYLE_BPM[a.style] })), `Ritmo cambiado a ${STYLE_BPM[a.style]} BPM`);
-    case 'bars': return editSong(s, (sg) => ({ ...sg, arr: sg.arr.map((x, i) => (i === a.index ? { ...x, bars: Math.max(1, Math.min(64, a.bars)) } : x)) }));
+    case 'bars':
+      if (songOf(s).arr[a.index]?.marker) return say(s, 'Con marcadores, la duración la da el audio: mueva el marcador en Multitrack o repita la sección');
+      return editSong(s, (sg) => ({ ...sg, arr: sg.arr.map((x, i) => (i === a.index ? { ...x, bars: Math.max(1, Math.min(64, a.bars)) } : x)) }));
     case 'end': return editSong(s, (sg) => ({ ...sg, end: a.end }));
     case 'songAdd': {
       const id = `u${Date.now().toString(36)}`;
@@ -234,11 +252,17 @@ export function liveReducer(s: LState, a: LAction): LState {
       const out = editSong(s, (x) => {
         const sections = x.sections.filter((sec) => sec.id !== a.id);
         const arr = x.arr.filter((it) => it.scene !== a.id);
-        return { ...x, sections, arr: arr.length ? arr : [{ scene: sections[0].id, bars: 4 }] };
+        const project = { ...x.project, markers: x.project.markers.filter((m) => m.sec !== a.id) };
+        return withArr({ ...x, sections, project, arr: arr.length ? arr : [{ scene: sections[0].id, bars: 4 }] });
       });
       return { ...out, sceneId: s.sceneId === a.id ? songOf(out).sections[0].id : s.sceneId };
     }
-    case 'arrAdd': return editSong(s, (x) => ({ ...x, arr: [...x.arr, { scene: a.scene, bars: a.bars }] }));
+    case 'arrAdd': return editSong(s, (x) => {
+      // Repetir un paso con marcador: se inserta una copia justo después (el audio salta atrás al repetir).
+      const item = { scene: a.scene, bars: a.bars, ...(a.marker ? { marker: a.marker } : {}) };
+      const arr = a.after !== undefined ? [...x.arr.slice(0, a.after + 1), item, ...x.arr.slice(a.after + 1)] : [...x.arr, item];
+      return withArr({ ...x, arr });
+    });
     case 'arrRemove': return editSong(s, (x) => (x.arr.length <= 1 ? x : { ...x, arr: x.arr.filter((_, i) => i !== a.index) }));
     case 'arrMove': return editSong(s, (x) => {
       const j = a.index + a.dir;
@@ -248,10 +272,29 @@ export function liveReducer(s: LState, a: LAction): LState {
       return { ...x, arr };
     });
     case 'arrScene': return editSong(s, (x) => ({ ...x, arr: x.arr.map((it, i) => (i === a.index ? { ...it, scene: a.scene } : it)) }));
-    case 'stemAdd': return editSong(s, (x) => ({ ...x, stems: [...x.stems, a.stem] }));
-    case 'stemEdit': return editSong(s, (x) => ({ ...x, stems: x.stems.map((st) => (st.id === a.id ? { ...st, ...a.patch } : st)) }));
-    case 'stemRemove': return editSong(s, (x) => ({ ...x, stems: x.stems.filter((st) => st.id !== a.id) }));
-    case 'stemsOnly': return editSong(s, (x) => ({ ...x, stemsOnly: a.on }));
+    case 'proj': {
+      const sg = songOf(s);
+      const next = applyOp(sg.project, a.op);
+      if (next === sg.project) return s;
+      const out = editSong(s, (x) => withArr({ ...x, project: next }));
+      if (isSetting(a.op)) return out;
+      const h = s.hist?.song === s.songId ? s.hist : { song: s.songId, past: [], future: [] };
+      return { ...out, hist: { song: s.songId, past: [...h.past, sg.project].slice(-100), future: [] } };
+    }
+    case 'projUndo':
+    case 'projRedo': {
+      const h = s.hist;
+      const undo = a.type === 'projUndo';
+      if (!h || h.song !== s.songId || !(undo ? h.past : h.future).length) return say(s, undo ? 'Nada que deshacer en el proyecto' : 'Nada que rehacer');
+      const cur = songOf(s).project;
+      const target = undo ? h.past[h.past.length - 1] : h.future[h.future.length - 1];
+      const out = editSong(s, (x) => withArr({ ...x, project: target }));
+      return {
+        ...out,
+        hist: undo ? { song: h.song, past: h.past.slice(0, -1), future: [...h.future, cur] } : { song: h.song, past: [...h.past, cur], future: h.future.slice(0, -1) },
+        toast: { id: ++seq, text: undo ? 'Edición deshecha' : 'Edición rehecha' },
+      };
+    }
     case 'zoneAdd': return { ...s, dirty: true, sampler: { ...s.sampler, zones: [...s.sampler.zones, a.zone] } };
     case 'zoneEdit': return { ...s, dirty: true, sampler: { ...s.sampler, zones: s.sampler.zones.map((z) => (z.id === a.id ? { ...z, ...a.patch } : z)) } };
     case 'zoneRemove': return { ...s, dirty: true, sampler: { ...s.sampler, zones: s.sampler.zones.filter((z) => z.id !== a.id) } };

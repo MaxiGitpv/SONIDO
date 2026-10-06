@@ -6,7 +6,16 @@ import { clamp } from '../util';
 const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 export function Footer() {
-  const { s, d, loadFile, rec, toggleRec, transport, song } = useLive();
+  const { s, d, loadFile, rec, toggleRec, transport, song, tpNow } = useLive();
+  const posRef = useRef<HTMLElement>(null);
+  // Vista compacta del transporte único: la misma posición que el estudio multitrack y las tablets.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const t = tpNow();
+      if (posRef.current) posRef.current.textContent = `${mmss(t.pos)}${song.project.clips.length ? ` · ${song.project.tracks.length} pistas` : ''}`;
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [tpNow, song.project.clips.length, song.project.tracks.length]);
   const file = useRef<HTMLInputElement>(null);
   const taps = useRef<number[]>([]);
   const [tt, setTt] = useState('');
@@ -44,7 +53,8 @@ export function Footer() {
       <div className="transport">
         <button className={`tp play${s.playing ? ' on' : ''}`} aria-label="Reproducir" onClick={() => transport('play')}><Icon name="play" size={22} /></button>
         <button className="tp" aria-label="Pausa" onClick={() => transport('pause')}><Icon name="pause" size={20} /></button>
-        <button className="tp" aria-label="Detener y volver al inicio" onClick={() => transport('stop')}><Icon name="stop" size={18} /></button>
+        <button className="tp" aria-label="Detener pistas y volver al inicio" title="Detiene pistas y acompañamiento; micrófonos, master y notas en vivo siguen" onClick={() => transport('stop')}><Icon name="stop" size={18} /></button>
+        <b ref={posRef} className="fpos" aria-label="Posición del transporte" />
         <button className={`tp rec${rec.on ? ' on' : ''}`} aria-pressed={rec.on} aria-label={rec.on ? 'Detener grabación' : 'Grabar el master'} title={rec.on ? 'Detener grabación' : 'Grabar el master'} onClick={toggleRec}>
           <i className="recdot" />{rec.on && <small>{mmss(rec.secs)}</small>}
         </button>

@@ -5,6 +5,7 @@
 @import './live/live4.css';
 @import './live/live5.css';
 @import './live/live6.css';
+@import './live/studio/studio.css';
 /* Consola de iglesia: cabecera, barra de mezcla, panel de canal arriba, bancos de canales al centro y master fijo a la derecha. */
 :root {
   --bg: #0f1316;

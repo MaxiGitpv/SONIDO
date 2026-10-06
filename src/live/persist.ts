@@ -1,13 +1,14 @@
 /*
- * Persistencia local versionada (schemaVersion 3), perfiles locales y exportación/importación.
+ * Persistencia local versionada (schemaVersion 4: proyecto multitrack por canción; 3: música/consola separadas), perfiles locales y exportación/importación.
  * Un perfil local separa configuraciones en este navegador; no es autenticación ni aislamiento seguro.
  */
 import type { Bus, Chan, ChId, LiveState, MusicScene, SceneId, SectionDef, Song } from './types';
 import { CH_IDS, IN_IDS, MUSIC_IDS, TIME_SIGS } from './types';
 import { DEFAULT_SECTIONS, SONGS, defaultBuses, defaultChan, defaultFx, defaultInputs, defaultMask, defaultMidi, defaultMix, defaultOutputs, defaultSampler, musicScene } from './data';
 import { clone } from '../util';
+import { emptyProject, normalizeProject } from './studio/model';
 
-export const SCHEMA = 3;
+export const SCHEMA = 4;
 export const SAVED_KEYS = ['songs', 'songId', 'sceneId', 'mix', 'console', 'buses', 'outputs', 'mixScenes', 'activeMix', 'recallMask', 'protectedCh', 'fx', 'master', 'masterMute', 'midi', 'split', 'transpose', 'playMode', 'src', 'inputs', 'sampler', 'view'] as const;
 export type SavedData = Pick<LiveState, (typeof SAVED_KEYS)[number]>;
 export interface SavedFile {
@@ -21,7 +22,9 @@ export interface SavedFile {
 
 const PROFILES = 'sonido.profiles';
 const ACTIVE = 'sonido.profile.active';
-const dataKey = (p: string) => `sonido.p.${p}.v3`;
+const dataKey = (p: string) => `sonido.p.${p}.v4`;
+/** Datos del esquema 3: se leen para migrar y se dejan intactos como respaldo. */
+const dataKeyV3 = (p: string) => `sonido.p.${p}.v3`;
 const V2 = 'sonido.live.v2';
 const V2_BACKUP = 'sonido.live.v2.backup';
 
@@ -94,7 +97,7 @@ export function migrateV2(old: V2Data): SavedData {
     const sections: SectionDef[] = (ids.length ? ids : DEFAULT_SECTIONS.map((x) => x.id)).map((id) => DEFAULT_SECTIONS.find((x) => x.id === id) ?? { id, label: id, kind: 'otro' });
     return {
       id: sg.id, title: sg.title, key: sg.key, bpm: sg.bpm, ts: TIME_SIGS.includes(sg.ts as never) ? (sg.ts as Song['ts']) : '4/4', style: sg.style ?? 'worship',
-      sections, arr: sg.arr?.length ? sg.arr : sections.map((x) => ({ scene: x.id, bars: 4 })), end: sg.end ?? 'stop', stems: [], stemsOnly: false,
+      sections, arr: sg.arr?.length ? sg.arr : sections.map((x) => ({ scene: x.id, bars: 4 })), end: sg.end ?? 'stop', project: emptyProject(),
     };
   });
   // La consola se toma de la escena que estaba abierta: era la mezcla vigente del operador.
@@ -161,7 +164,11 @@ export function normalize(d: Partial<SavedData>): SavedData {
     }
     out.console[id] = c;
   }
-  out.songs = (out.songs ?? base.songs).map((s) => ({ ...base.songs[1], ...s, sections: s.sections?.length ? s.sections : clone(DEFAULT_SECTIONS), stems: s.stems ?? [], ts: TIME_SIGS.includes(s.ts) ? s.ts : '4/4' }));
+  out.songs = (out.songs ?? base.songs).map((s) => {
+    // Esquema 3: `stems` (un archivo por pista con desplazamiento) pasa a pistas y clips sin perder nada.
+    const { stems, stemsOnly, ...rest } = s;
+    return { ...base.songs[1], ...rest, sections: s.sections?.length ? s.sections : clone(DEFAULT_SECTIONS), ts: TIME_SIGS.includes(s.ts) ? s.ts : '4/4', project: normalizeProject(s.project, stems, stemsOnly) };
+  });
   for (const sg of out.songs) {
     out.mix[sg.id] = out.mix[sg.id] ?? {};
     for (const sec of sg.sections) if (!out.mix[sg.id][sec.id]) out.mix[sg.id][sec.id] = musicScene(sec.kind);
@@ -188,6 +195,16 @@ export function loadProfile(profile: string): { data: SavedData; note: string } 
     } catch {
       /* archivo dañado: se usan valores por defecto y se avisa */
       return { data: defaults(), note: 'Los datos guardados de este perfil estaban dañados; se cargaron valores iniciales.' };
+    }
+  }
+  // Esquema 3 (C1–C5): se migra; la copia v3 queda intacta como respaldo.
+  const v3 = ls.get(dataKeyV3(profile));
+  if (v3) {
+    try {
+      const f = JSON.parse(v3) as SavedFile;
+      if (f.data) return { data: normalize(f.data), note: 'Sus pistas se pasaron al nuevo estudio multitrack. La copia anterior quedó guardada.' };
+    } catch {
+      return { data: defaults(), note: 'No se pudieron leer los datos anteriores; la copia original sigue intacta.' };
     }
   }
   // Primera vez con el esquema 3: migrar los datos del esquema 2 sin destruirlos.
@@ -224,10 +241,10 @@ export function exportFile(s: LiveState, profile: string, assets: SavedFile['ass
 /** Valida y migra un archivo importado. Devuelve los datos y los archivos de audio que faltan. */
 export function importFile(text: string): { data: SavedData; missing: string[] } {
   const f = JSON.parse(text) as Partial<SavedFile> & { songs?: unknown };
-  if (f.schemaVersion === SCHEMA && f.data) {
+  if ((f.schemaVersion === SCHEMA || f.schemaVersion === 3) && f.data) {
     const data = normalize(f.data);
     const needed = new Set<string>();
-    data.songs.forEach((s) => s.stems.forEach((st) => needed.add(`${s.title}: ${st.name}`)));
+    data.songs.forEach((s) => s.project.clips.forEach((c) => needed.add(`${s.title}: ${s.project.assets[c.asset]?.name ?? c.asset}`)));
     data.sampler.zones.forEach((z) => needed.add(`Sampler: ${z.name}`));
     return { data, missing: [...needed] };
   }

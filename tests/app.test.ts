@@ -120,14 +120,11 @@ test('migración del esquema 2: consola desde la escena abierta, arreglo como ni
   for (const id of CH_IDS) assert.ok(d.console[id], `canal ${id}`);
 });
 
-test('exportar e importar conserva la sesión y lista los audios faltantes', () => {
+test('exportar e importar conserva la sesión y no lleva dispositivos', () => {
   let s = fresh();
   s = liveReducer(s, { type: 'songEdit', id: s.songId, patch: { title: 'Exportada' } });
-  s = liveReducer(s, { type: 'stemAdd', stem: { id: 'st1', name: 'Batería', cat: 'bateria', asset: 'a1', db: 0, mute: false, offset: 0, duration: 120 } });
-  const file = exportFile(s, 'Principal', []);
-  const { data, missing } = importFile(file);
+  const { data } = importFile(exportFile(s, 'Principal', []));
   assert.equal(data.songs.find((x) => x.id === s.songId)!.title, 'Exportada');
-  assert.ok(missing.some((m) => m.includes('Batería')));
   for (const id of ['in1', 'in2'] as const) assert.equal(data.inputs[id].device, null, 'los dispositivos no viajan entre equipos');
 });
 

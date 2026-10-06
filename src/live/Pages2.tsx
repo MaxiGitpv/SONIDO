@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLive, Icon } from './ctx';
 import { ModuleHead } from './nav';
 import { CH_META, chIcon, chName, mixDataOf } from './data';
-import { CH_IDS, STEM_CATS } from './types';
-import type { RecallMask, StemCat } from './types';
-import { engine, meter } from './engine';
+import { CH_IDS } from './types';
+import type { RecallMask } from './types';
+import { engine } from './engine';
 import { meterBus } from '../meterEngine';
 import { HSlider } from '../components/HSlider';
 import { dbToPos, fmtDb, posToDb } from '../util';
@@ -263,57 +263,6 @@ export function MixScenesPage() {
           <p className="hint2">Por defecto se protege al pastor y no se recuperan el master ni el trim: así una escena no sorprende a la sala ni a los micrófonos.</p>
         </section>
       </div>
-    </div>
-  );
-}
-
-/* ---------- Multitrack ---------- */
-const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-
-export function StemsPage() {
-  const { d, song, can, assets, addStems, remote } = useLive();
-  const input = useRef<HTMLInputElement>(null);
-  const edit = can('music');
-  const total = song.arr.reduce((a, x) => a + x.bars, 0) * meter(song.ts, song.bpm).bar;
-  const missing = song.stems.filter((st) => assets[st.asset] === 'missing' || assets[st.asset] === 'error');
-  const loading = song.stems.filter((st) => !assets[st.asset] || assets[st.asset] === 'loading');
-  const ready = song.stems.length > 0 && !missing.length && !loading.length;
-  return (
-    <div className="mpage">
-      <ModuleHead title={`Multitrack · ${song.title}`} desc="Varios stems de la canción que arrancan en el mismo instante del reloj de audio y siguen alineados al pausar, cambiar de sección o repetir. El click y la guía van solo a monitores.">
-        <input ref={input} type="file" accept="audio/*" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; if (f.length) void addStems(f); e.target.value = ''; }} />
-        <button className="mini on" disabled={!edit || remote} onClick={() => input.current?.click()}><Icon name="upload" size={14} /> Importar stems…</button>
-      </ModuleHead>
-      <p className={ready ? 'inok' : song.stems.length ? 'inwarn' : 'hint2'}>
-        {song.stems.length === 0 ? 'Esta canción todavía no tiene stems. Importe varios archivos a la vez (batería, bajo, teclados, guitarras, voces, ambiente, click, guía).' : ready ? `Arreglo listo: ${song.stems.length} stems cargados.` : `${missing.length ? `Faltan ${missing.length} archivos (${missing.map((x) => x.name).join(', ')}). ` : ''}${loading.length ? `Cargando ${loading.length}…` : ''}`}
-      </p>
-      <label className="chk">
-        <input type="checkbox" disabled={!edit} checked={song.stemsOnly} onChange={(e) => d({ type: 'stemsOnly', on: e.target.checked })} />
-        Usar solo las pistas en esta canción (silencia los instrumentos sintetizados; los micrófonos siguen igual)
-      </label>
-      <div className="stemlist">
-        {song.stems.map((st) => {
-          const status = assets[st.asset] ?? 'loading';
-          const short = st.duration + st.offset < total - 0.5;
-          return (
-            <div key={st.id} className={`stem-row ${status}`}>
-              <input aria-label="Nombre del stem" value={st.name} maxLength={32} disabled={!edit} onChange={(e) => d({ type: 'stemEdit', id: st.id, patch: { name: e.target.value } })} />
-              <select aria-label="Categoría" value={st.cat} disabled={!edit} onChange={(e) => d({ type: 'stemEdit', id: st.id, patch: { cat: e.target.value as StemCat } })}>
-                {STEM_CATS.map((c) => <option key={c.id} value={c.id}>{c.label}{c.id === 'click' || c.id === 'guia' ? ' (solo monitores)' : ''}</option>)}
-              </select>
-              {dbSlider(`Nivel de ${st.name}`, st.db, (v) => d({ type: 'stemEdit', id: st.id, patch: { db: v } }), undefined, !edit)}
-              <b>{fmtDb(st.db)}</b>
-              <button className={`ms m${st.mute ? ' on' : ''}`} disabled={!edit} aria-pressed={st.mute} onClick={() => d({ type: 'stemEdit', id: st.id, patch: { mute: !st.mute } })}>M</button>
-              <label className="offset">Inicio
-                <input type="number" step="0.01" value={st.offset} disabled={!edit} onChange={(e) => d({ type: 'stemEdit', id: st.id, patch: { offset: Number(e.target.value) || 0 } })} />s
-              </label>
-              <small>{mmss(st.duration)}{short ? ' · termina antes que la canción' : ''} · {status === 'ready' ? 'listo' : status === 'loading' ? 'cargando' : status === 'missing' ? 'falta el archivo' : 'error al decodificar'}</small>
-              <button className="iconbtn" aria-label={`Quitar ${st.name}`} disabled={!edit} onClick={() => d({ type: 'stemRemove', id: st.id })}><Icon name="x" size={14} /></button>
-            </div>
-          );
-        })}
-      </div>
-      <p className="hint2">Duración del arreglo: {mmss(total)} a {song.bpm} BPM. Cambiar el BPM o la tonalidad no estira ni transpone el audio grabado: solo cambia la parte sintetizada. Un stem más corto simplemente se calla al terminar.</p>
     </div>
   );
 }

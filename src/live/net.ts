@@ -20,11 +20,21 @@ export type ServerMsg =
   | { t: 'denied'; reason: string }
   | { t: 'peers'; peers: Peer[] }
   | { t: 'state'; rev: number; data: unknown; levels?: Record<string, number> }
-  | { t: 'levels'; levels: Record<string, number> }
+  | { t: 'levels'; levels: Record<string, number>; tp?: TransportInfo }
+  | { t: 'req'; id: string; from: string; what: 'peaks'; asset: string }
+  | { t: 'res'; id: string; ok: boolean; data?: unknown; reason?: string }
   | { t: 'cmd'; id: string; from: string; role: Role; action: { type: string } & Record<string, unknown> }
   | { t: 'ack'; id: string; ok: boolean; reason?: string }
   | { t: 'host-left' }
   | { t: 'mixer'; ev: MixerEvent };
+
+/** Estado del transporte que publica el anfitrión; el cliente lo extrapola con su propio reloj. */
+export interface TransportInfo {
+  playing: boolean;
+  pos: number;
+  sec: number;
+  pending: number | null;
+}
 
 export interface MixerInfo {
   ip: string;
@@ -50,6 +60,7 @@ export class NetClient {
   private handlers = new Set<Handler>();
   private seq = 0;
   private pending = new Map<string, (ok: boolean, reason?: string) => void>();
+  private waiting = new Map<string, (r: { ok: boolean; data?: unknown; reason?: string }) => void>();
   onStatus: ((s: NetStatus, detail?: string) => void) | null = null;
 
   /** Dirección por defecto: el mismo equipo que sirvió la página, si fue el puente. */
@@ -83,6 +94,10 @@ export class NetClient {
       if (m.t === 'ack') {
         this.pending.get(m.id)?.(m.ok, m.reason);
         this.pending.delete(m.id);
+      }
+      if (m.t === 'res') {
+        this.waiting.get(m.id)?.(m);
+        this.waiting.delete(m.id);
       }
       this.handlers.forEach((h) => h(m));
     };
@@ -128,6 +143,21 @@ export class NetClient {
           resolve({ ok: false, reason: 'sin respuesta del anfitrión' });
         }
       }, 4000);
+    });
+  }
+
+  /** Pide datos al anfitrión (p. ej. picos reducidos de un archivo). No transporta audio. */
+  request(what: 'peaks', asset: string): Promise<{ ok: boolean; data?: unknown; reason?: string }> {
+    const id = `r${Date.now().toString(36)}${(++this.seq).toString(36)}`;
+    return new Promise((resolve) => {
+      this.waiting.set(id, resolve);
+      this.send({ t: 'req', id, what, asset });
+      window.setTimeout(() => {
+        if (this.waiting.has(id)) {
+          this.waiting.delete(id);
+          resolve({ ok: false, reason: 'sin respuesta del anfitrión' });
+        }
+      }, 8000);
     });
   }
 

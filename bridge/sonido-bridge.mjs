@@ -62,6 +62,7 @@ export async function startBridge(opts = {}) {
   const clients = new Map(); // id -> { ws, role, name, host, ownBus, seen:Set }
   let hostId = null;
   let lastState = null;
+  let lastTp = null;
 
   server.on('upgrade', (req, socket, head) => {
     if (!(req.url ?? '').startsWith('/ws')) return socket.destroy();
@@ -94,6 +95,7 @@ export async function startBridge(opts = {}) {
         if (me.host) hostId = id;
         send(ws, { t: 'welcome', id, role, host: me.host, hostPresent: !!hostId, ownBus: me.ownBus, mixers: mixer.found });
         if (!me.host && lastState) send(ws, { t: 'state', ...lastState }); // estado completo al (re)conectar
+        if (!me.host && lastTp) send(ws, { t: 'levels', levels: {}, tp: lastTp }); // y la posición del transporte
         if (mixer.info) send(ws, { t: 'mixer', ev: { kind: 'connected', mixer: mixer.info } });
         sendPeers();
         log(`+ ${me.name} (${ROLE_LABEL[role]}${me.host ? ', anfitrión' : ''})`);
@@ -123,8 +125,24 @@ export async function startBridge(opts = {}) {
           broadcast({ t: 'state', rev: m.rev, data: m.data }, id);
           return;
         case 'levels':
-          if (me.host) broadcast({ t: 'levels', levels: m.levels }, id);
+          if (!me.host) return;
+          if (m.tp) lastTp = m.tp;
+          broadcast({ t: 'levels', levels: m.levels, tp: m.tp }, id);
           return;
+        case 'req': {
+          // Datos de solo lectura que el anfitrión ya tiene (picos de forma de onda). Nunca audio.
+          if (m.what !== 'peaks' || typeof m.id !== 'string' || typeof m.asset !== 'string') return;
+          const host = hostId && clients.get(hostId);
+          if (!host) return send(ws, { t: 'res', id: m.id, ok: false, reason: 'no hay equipo anfitrión conectado' });
+          send(host.ws, { t: 'req', id: m.id, from: id, what: m.what, asset: m.asset.slice(0, 80) });
+          return;
+        }
+        case 'res': {
+          if (!me.host) return;
+          const to = clients.get(m.to);
+          if (to) send(to.ws, { t: 'res', id: m.id, ok: !!m.ok, data: m.data, reason: m.reason });
+          return;
+        }
         case 'mixer':
           if (!['all', 'mixer'].includes(me.role)) return send(ws, { t: 'mixer', ev: { kind: 'error', message: 'Solo el sonidista o el anfitrión controlan la mesa' } });
           mixer.handle(m);

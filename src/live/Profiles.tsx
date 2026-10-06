@@ -35,7 +35,7 @@ export function ProfileMenu({ onClose, onProfile, onLegacy }: { onClose: () => v
   };
 
   const doExport = async () => {
-    const assets = (await listAssets()).map((a) => ({ id: a.id, name: a.name, type: a.type, bytes: a.bytes, usedBy: s.songs.find((sg) => sg.stems.some((st) => st.asset === a.id))?.title ?? (s.sampler.zones.some((z) => z.asset === a.id) ? 'Sampler' : 'Pista') }));
+    const assets = (await listAssets()).map((a) => ({ id: a.id, name: a.name, type: a.type, bytes: a.bytes, usedBy: s.songs.find((sg) => sg.project.clips.some((c) => c.asset === a.id))?.title ?? (s.sampler.zones.some((z) => z.asset === a.id) ? 'Sampler' : 'Pista') }));
     const blob = new Blob([exportFile(s, profile, assets)], { type: 'application/json' });
     if (exportUrl) URL.revokeObjectURL(exportUrl);
     setExportUrl(URL.createObjectURL(blob));

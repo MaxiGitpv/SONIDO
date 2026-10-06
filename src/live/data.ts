@@ -1,6 +1,7 @@
 import type { Bus, Chan, ChId, Fx, InId, InputCfg, Layer, MidiMap, MixData, MusicScene, Outputs, RecallMask, SamplerCfg, Section, SectionDef, SectionKind, Song, SceneId, SoundCat, SoundId, Style } from './types';
 import type { EqBand } from '../types';
 import { CH_IDS, IN_IDS, KINDS, MONITOR_ONLY, MUSIC_IDS, PLAYABLE, isInput } from './types';
+import { emptyProject } from './studio/model';
 
 export const CH_META: Record<ChId, { name: string; color: string; badge: string }> = {
   piano: { name: 'Piano', color: '#35b4ff', badge: 'Sinte' },
@@ -82,7 +83,7 @@ const ARR: Section[] = [
   { scene: 'final', bars: 4 },
 ];
 const mkSong = (id: string, title: string, key: string, bpm: number, style: Style, end: Song['end'] = 'stop', extra: Partial<Song> = {}): Song => ({
-  id, title, key, bpm, ts: '4/4', style, sections: DEFAULT_SECTIONS.map((x) => ({ ...x })), arr: ARR.map((x) => ({ ...x })), end, stems: [], stemsOnly: false, ...extra,
+  id, title, key, bpm, ts: '4/4', style, sections: DEFAULT_SECTIONS.map((x) => ({ ...x })), arr: ARR.map((x) => ({ ...x })), end, project: emptyProject(), ...extra,
 });
 export const newSong = (id: string, title: string): Song => mkSong(id, title, 'G', 72, 'worship');
 export const SONGS: Song[] = [

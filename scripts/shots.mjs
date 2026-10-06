@@ -73,6 +73,7 @@ const S = {
     tr.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); await wait(50); const minimo = tr.getAttribute('aria-valuetext');
     tr.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); await wait(50);
     report({ inicial: v0, trasToqueSinArrastre: trasToque, teclado14x05: enCero, pulgarEn0dB: al0, arrastre30px: arrastre, fino30pxShift: fino, fin: minimo, dobleClic: val() });` },
+  'multitrack-envivo-1280x720': { size: '1280,720', run: `tab('Multitrack'); await wait(200); byText('.studio .segx button', 'En vivo').click(); await wait(200); report(${layout});` },
   'multitrack-1366x768': { size: '1366,768', run: `tab('Multitrack'); await wait(200); report(${layout});` },
 };
 
