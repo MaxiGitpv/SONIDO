@@ -1,6 +1,6 @@
 import type { Bus, Chan, ChId, EndAction, EqTab, Fx, InId, InputCfg, LiveState, Macros, MidiMap, MixScene, MusicLevel, Outputs, PlayMode, RecallMask, SampleZone, SamplerCfg, SceneId, SectionDef, SectionKind, Send, Song, SoundCat, SoundId, SrcMode, StripGroup, Style, Tab, View, Zone } from './types';
 import { CH_IDS } from './types';
-import { BUS_COLORS, STYLE_BPM, applyLayers, defaultChan, layersFor, mixDataOf, musicScene, newSong, PRESETS } from './data';
+import { BUS_COLORS, KEY_NAMES, KEY_SEMI, STYLE_BPM, applyLayers, defaultChan, layersFor, mixDataOf, musicScene, newSong, PRESETS } from './data';
 import { normalize } from './persist';
 import type { SavedData } from './persist';
 import { clone } from '../util';
@@ -108,6 +108,15 @@ const editScene = (s: LState, fn: (m: LState['mix'][string][string]) => LState['
 });
 const editSong = (s: LState, fn: (sg: Song) => Song): LState => ({ ...s, dirty: true, songs: s.songs.map((x) => (x.id === s.songId ? fn(x) : x)) });
 const editCh = (s: LState, id: ChId, fn: (c: Chan) => Chan): LState => ({ ...s, dirty: true, console: { ...s.console, [id]: fn(s.console[id]) } });
+/** El tempo y la tonalidad de referencia siguen a la versión procesada del audio (también al deshacer). */
+const withVersion = (sg: Song, before: Project): Song => {
+  const v = sg.project.version;
+  const b = before.version;
+  if (JSON.stringify(v) === JSON.stringify(b)) return sg;
+  if (v) return { ...sg, bpm: Math.round(v.baseBpm * v.rate * 10) / 10, key: KEY_NAMES[(((KEY_SEMI[v.baseKey] ?? 0) + v.semitones) % 12 + 12) % 12] };
+  if (b) return { ...sg, bpm: b.baseBpm, key: b.baseKey };
+  return sg;
+};
 /** Con marcadores, el orden de la canción sale del audio (y se conservan repeticiones y orden armados). */
 const withArr = (sg: Song): Song => {
   const had = sg.arr.some((x) => x.marker);
@@ -276,7 +285,7 @@ export function liveReducer(s: LState, a: LAction): LState {
       const sg = songOf(s);
       const next = applyOp(sg.project, a.op);
       if (next === sg.project) return s;
-      const out = editSong(s, (x) => withArr({ ...x, project: next }));
+      const out = editSong(s, (x) => withArr(withVersion({ ...x, project: next }, x.project)));
       if (isSetting(a.op)) return out;
       const h = s.hist?.song === s.songId ? s.hist : { song: s.songId, past: [], future: [] };
       return { ...out, hist: { song: s.songId, past: [...h.past, sg.project].slice(-100), future: [] } };
@@ -288,7 +297,7 @@ export function liveReducer(s: LState, a: LAction): LState {
       if (!h || h.song !== s.songId || !(undo ? h.past : h.future).length) return say(s, undo ? 'Nada que deshacer en el proyecto' : 'Nada que rehacer');
       const cur = songOf(s).project;
       const target = undo ? h.past[h.past.length - 1] : h.future[h.future.length - 1];
-      const out = editSong(s, (x) => withArr({ ...x, project: target }));
+      const out = editSong(s, (x) => withArr(withVersion({ ...x, project: target }, x.project)));
       return {
         ...out,
         hist: undo ? { song: h.song, past: h.past.slice(0, -1), future: [...h.future, cur] } : { song: h.song, past: [...h.past, cur], future: h.future.slice(0, -1) },

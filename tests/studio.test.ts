@@ -153,3 +153,23 @@ test('picos: salen del audio real y los reducidos para tablets conservan la form
   const [lo2, hi2] = rangeAt(w, pickLevel(w, 4096), 0, 0.2, 0.4);
   assert.ok(Math.abs(hi2 - 0.5) < 0.02 && Math.abs(lo2 + 0.5) < 0.02);
 });
+
+test('versión procesada: tiempos × factor, BPM y tonalidad siguen a la versión y se deshace junto', () => {
+  let s = fresh();
+  const song = () => s.songs.find((x) => x.id === s.songId)!;
+  const bpm0 = song().bpm;
+  const key0 = song().key;
+  s = liveReducer(s, { type: 'proj', op: { k: 'addAudio', tracks: [newTrack('A', 'otro', { id: 'tx' })], clips: [clip({ track: 'tx', pos: 9, off: 0.9, len: 9, fadeIn: 0.9 })], assets: { a1: { name: 'A', duration: 30, channels: 2, sampleRate: 48000, bytes: 1 } } } });
+  s = liveReducer(s, { type: 'proj', op: { k: 'marker', m: { id: 'mk', at: 9, sec: 'coro' } } });
+  s = liveReducer(s, { type: 'proj', op: { k: 'retime', map: { a1: 'a2' }, factor: 1 / 0.9, assets: { a2: { name: 'A · 90 %', duration: 33.34, channels: 2, sampleRate: 48000, bytes: 1, from: { asset: 'a1', rate: 0.9, semitones: 2 } } }, version: { rate: 0.9, semitones: 2, baseBpm: bpm0, baseKey: key0 } } });
+  const c = song().project.clips[0];
+  assert.equal(c.asset, 'a2');
+  assert.ok(Math.abs(c.pos - 10) < 1e-9 && Math.abs(c.off - 1) < 1e-9 && Math.abs(c.len - 10) < 1e-9 && Math.abs(c.fadeIn - 1) < 1e-9);
+  assert.ok(Math.abs(song().project.markers[0].at - 10) < 1e-9, 'el marcador sigue al audio');
+  assert.equal(song().bpm, Math.round(bpm0 * 0.9 * 10) / 10);
+  assert.notEqual(song().key, key0, 'la tonalidad de referencia sube 2 semitonos');
+  s = liveReducer(s, { type: 'projUndo' });
+  assert.equal(song().bpm, bpm0, 'deshacer vuelve también al tempo de referencia original');
+  assert.equal(song().key, key0);
+  assert.equal(song().project.clips[0].asset, 'a1');
+});

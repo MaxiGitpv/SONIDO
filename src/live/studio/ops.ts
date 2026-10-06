@@ -2,7 +2,7 @@
  * Operaciones de edición del proyecto multitrack (puras). Las usa el reductor del estado, que guarda el
  * historial de deshacer/rehacer solo del proyecto: deshacer una edición nunca revierte micrófonos ni master.
  */
-import type { AssetInfo, Clip, Marker, Project, Track } from '../types';
+import type { AssetInfo, Clip, Marker, Project, ProjVersion, Track } from '../types';
 import { applyToLinked, duplicate, moveClips, moveTrack, removeClips, splitAt, trimEnd, trimStart, uid } from './model';
 
 export type ProjOp =
@@ -21,12 +21,14 @@ export type ProjOp =
   | { k: 'group'; ids: string[]; on: boolean }
   | { k: 'marker'; m: Marker }
   | { k: 'markerRemove'; id: string }
-  | { k: 'settings'; patch: Partial<Pick<Project, 'snap' | 'accomp' | 'countIn' | 'loop'>> };
+  | { k: 'settings'; patch: Partial<Pick<Project, 'snap' | 'accomp' | 'countIn' | 'loop'>> }
+  /** Cambia todo el proyecto a otra versión de sus archivos: tiempos × factor (clips, fundidos, marcadores, A/B). */
+  | { k: 'retime'; map: Record<string, string>; factor: number; assets: Record<string, AssetInfo>; version: ProjVersion | null };
 
 /** Etiqueta corta para el aviso de deshacer. */
 export const OP_LABEL: Record<ProjOp['k'], string> = {
   addAudio: 'importar', asset: 'archivo', track: 'pista', trackMove: 'ordenar pistas', trackRemove: 'quitar pista', move: 'mover', trimStart: 'recortar inicio',
-  trimEnd: 'recortar final', split: 'dividir', dup: 'duplicar', remove: 'eliminar', clip: 'ganancia/fundidos', group: 'grupo', marker: 'marcador', markerRemove: 'quitar marcador', settings: 'ajustes',
+  trimEnd: 'recortar final', retime: 'tempo y tono', split: 'dividir', dup: 'duplicar', remove: 'eliminar', clip: 'ganancia/fundidos', group: 'grupo', marker: 'marcador', markerRemove: 'quitar marcador', settings: 'ajustes',
 };
 
 const dur = (p: Project, c: Clip) => p.assets[c.asset]?.duration || c.off + c.len;
@@ -83,6 +85,19 @@ export function applyOp(p: Project, op: ProjOp): Project {
       return { ...p, markers: p.markers.filter((m) => m.id !== op.id) };
     case 'settings':
       return { ...p, ...op.patch, loop: op.patch.loop ? { ...p.loop, ...op.patch.loop } : p.loop };
+    case 'retime': {
+      const f = op.factor;
+      const out: Project = {
+        ...p,
+        assets: { ...p.assets, ...op.assets },
+        clips: p.clips.map((c) => ({ ...c, asset: op.map[c.asset] ?? c.asset, pos: c.pos * f, off: c.off * f, len: c.len * f, fadeIn: c.fadeIn * f, fadeOut: c.fadeOut * f })),
+        markers: p.markers.map((m) => ({ ...m, at: m.at * f })),
+        loop: { ...p.loop, a: p.loop.a * f, b: p.loop.b * f },
+      };
+      if (op.version) out.version = op.version;
+      else delete out.version;
+      return out;
+    }
   }
 }
 

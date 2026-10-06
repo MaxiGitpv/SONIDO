@@ -38,7 +38,7 @@ export function SongHeader() {
         </select>
       </label>
       <label className="pill bpm">
-        <input type="number" min={40} max={200} value={song.bpm} aria-label="BPM" onChange={(e) => d({ type: 'songEdit', id: song.id, patch: { bpm: clamp(Number(e.target.value) || 60, 40, 200) } })} />
+        <input type="number" min={40} max={200} step={song.bpm % 1 ? 0.1 : 1} value={song.bpm} aria-label="BPM" onChange={(e) => d({ type: 'songEdit', id: song.id, patch: { bpm: clamp(Math.round((Number(e.target.value) || 60) * 10) / 10, 40, 200) } })} />
         <span>BPM</span>
       </label>
       <label className="pill">

@@ -223,6 +223,15 @@ export interface AssetInfo {
   channels: number;
   sampleRate: number;
   bytes: number;
+  /** Versión procesada (tempo/tono) de otro archivo; el original se conserva. */
+  from?: { asset: string; rate: number; semitones: number };
+}
+/** Versión procesada vigente del proyecto y de dónde se partió (para volver al original). */
+export interface ProjVersion {
+  rate: number;
+  semitones: number;
+  baseBpm: number;
+  baseKey: string;
 }
 export interface Project {
   v: 1;
@@ -237,6 +246,8 @@ export interface Project {
   accomp: boolean;
   /** Compases de cuenta (solo click) antes de empezar. */
   countIn: number;
+  /** Tempo/tono procesados (copias renderizadas); ausente = audio original. */
+  version?: ProjVersion;
 }
 
 export interface Song {

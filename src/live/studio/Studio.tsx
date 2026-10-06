@@ -17,6 +17,7 @@ import { peaksStore, pickLevel, rangeAt } from './peaks';
 import { HSlider } from '../../components/HSlider';
 import { clamp, dbToLin, dbToPos, fmtDb, posToDb } from '../../util';
 import type { ProjOp } from './ops';
+import { TempoCard } from './TempoCard';
 
 const HEAD_W = 220;
 const RULER_H = 44;
@@ -418,6 +419,7 @@ function Arrange({ edit }: { edit: boolean }) {
             }} />
             <Markers song={song} edit={edit} />
             <Order song={song} edit={edit} />
+            <TempoCard edit={edit} />
           </aside>
         )}
       </div>

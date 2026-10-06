@@ -53,6 +53,13 @@ Comportamiento comprobado:
 - Si dos personas tocan el mismo control en menos de 1,5 s, gana la primera y la segunda recibe aviso.
 - Si un cliente se desconecta, al volver recibe el último estado. Si el anfitrión se va, los clientes lo ven y sus órdenes se rechazan hasta que vuelva; el audio no se corta en el anfitrión cuando se cierra una tableta.
 
+### Multitrack desde una tablet
+
+- La tablet ve el proyecto (pistas, clips, marcadores) y lo puede editar según su rol: cada edición es una orden que el puente valida y el anfitrión ejecuta.
+- No decodifica ni reproduce audio: pide al anfitrión **picos reducidos** de cada archivo (unos KB por minuto) para dibujar las formas de onda.
+- La posición del transporte llega con los medidores; al reconectar recibe la última posición y el estado sin reiniciar el audio del anfitrión.
+- Los audios se importan en el anfitrión. Enviar archivos desde la tablet no está implementado.
+
 ## 4. Conectar la mesa X Air / X32
 
 1. Mesa y anfitrión en la misma red. Por **Ethernet**: cable a la mesa o al mismo router. Por **Wi‑Fi**: el anfitrión se une al punto de acceso de la X Air, o la mesa en modo cliente al router de la iglesia (recomendado: router propio, sin internet obligatorio).

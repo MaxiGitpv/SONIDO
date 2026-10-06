@@ -188,6 +188,44 @@ try {
   ok('10_dominios', rel && noteAfterStop > 0.3 * noteBefore && noteBefore > 0.0005 && drumsOff < 0.0005 && drumsOn > 0.005, `nota en vivo (${ch}) sonando ${noteBefore.toFixed(3)} → tras detener pistas ${noteAfterStop.toFixed(3)}; batería sintetizada sin vínculo ${drumsOff.toExponential(1)} / con vínculo ${drumsOn.toFixed(3)}`);
   await proj({ k: 'settings', patch: { accomp: false } });
 
+  // 12. Tempo procesado del grupo desde la interfaz: A y −A procesados con los mismos parámetros siguen cancelando.
+  {
+    const ids = await ev(`${P}.song().project.tracks.map((t) => [t.id, t.name])`);
+    for (const [id, name] of ids) await proj({ k: 'track', id, patch: { mute: name === 'Click' } });
+    const bpm0 = await ev(`${P}.song().bpm`);
+    const before = await clips();
+    await ev(`(() => { const r = document.querySelector('input[aria-label=Velocidad]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(r, '0.9'); r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await wait(150);
+    const t0 = Date.now();
+    const dbg = await ev(`({ botones: [...document.querySelectorAll('.st-card button')].map((b) => b.textContent + (b.disabled ? ' (off)' : '')), vel: document.querySelector('input[aria-label=Velocidad]')?.value, tab: document.querySelector('.ltabs button.on')?.textContent })`);
+    R.debug12 = dbg;
+    const btn = await ev(`(() => { const b = [...document.querySelectorAll('.st-card button')].find((x) => x.textContent === 'Preparar versión'); if (b) b.click(); return !!b; })()`);
+    if (!btn) throw new Error('sin botón Preparar versión: ' + JSON.stringify(dbg));
+    let ver = null;
+    while (!ver && Date.now() - t0 < 90000) { await wait(500); ver = await ev(`${P}.song().project.version ?? null`); }
+    const secs = (Date.now() - t0) / 1000;
+    if (!ver) throw new Error('sin versión tras ' + secs + ' s: ' + JSON.stringify(await ev(`({ toast: document.querySelector('.live-toast')?.textContent, estado: [...document.querySelectorAll('.st-card .st-warn')].map((x) => x.textContent) })`)) + ' · consola: ' + pg.logs.slice(-5).join(' | '));
+    const after = await clips();
+    const bpm1 = await ev(`${P}.song().bpm`);
+    const durs = await ev(`Object.values(${P}.song().project.assets).filter((a) => a.from).map((a) => +a.duration.toFixed(3))`);
+    await T('seek', 3.5 / 0.9); await T('play'); await wait(500);
+    const sumV = await sample(6);
+    const tB2 = await trackId(1);
+    await proj({ k: 'track', id: tB2, patch: { mute: true } }); await wait(250);
+    const refV = await sample(6);
+    await proj({ k: 'track', id: tB2, patch: { mute: false } });
+    await T('pause');
+    const scaled = before.every((c, i) => Math.abs(after[i].pos - c.pos / 0.9) < 1e-6 && Math.abs(after[i].len - c.len / 0.9) < 1e-6);
+    await ev(`[...document.querySelectorAll('.st-card button')].find((b) => b.textContent === 'Volver al original').click()`);
+    await wait(300);
+    const back = await clips();
+    const bpm2 = await ev(`${P}.song().bpm`);
+    const restored = back.every((c, i) => c.asset === before[i].asset && Math.abs(c.pos - before[i].pos) < 1e-6);
+    ok('12_tempo_procesado', !!ver && scaled && bpm1 === Math.round(bpm0 * 9) / 10 && sumV < 0.02 * refV && restored && bpm2 === bpm0,
+      `versión ${ver ? ver.rate : '—'} en ${secs.toFixed(1)} s; archivos ${JSON.stringify(durs)} s (8/0,9 = 8,889); BPM ${bpm0} → ${bpm1} → ${bpm2}; clips escalados ${scaled}; A′+B′ ${sumV.toExponential(2)} vs B′ muda ${refV.toFixed(3)}; vuelta al original ${restored}`);
+    await pg.shot(`${out}/estudio-tempo.png`);
+  }
+
   // 11. Tablet: control remoto sin motor ni audio; recibe picos reducidos y la posición del anfitrión.
   await ev(`[...document.querySelectorAll('.ltabs button')].find((b) => b.textContent === 'Red y mesa').click()`); await wait(200);
   await ev(`(() => { const i = document.querySelector('input[aria-label=PIN]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '1111'); i.dispatchEvent(new Event('input', { bubbles: true })); [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Conectar').click(); })()`);
