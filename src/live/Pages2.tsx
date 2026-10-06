@@ -477,6 +477,14 @@ function ExternalMixer({ canControl }: { canControl: boolean }) {
               <label className="xg">{send > 0 ? `Envío bus ${send}` : 'Fader'} {fmtDb(faderToDb(lvl))}
                 <HSlider label={`Nivel canal ${n}`} value={faderToDb(lvl)} toPos={dbToPos} fromPos={posToDb} snap={(x) => Math.round(x * 2) / 2} disabled={!canControl} onChange={(x) => set(lvlAddr, 'f', dbToFader(x))} />
               </label>
+              {send === 0 && (() => {
+                const pan = Math.round((num(`${c}/mix/pan`, 0.5) - 0.5) * 200);
+                return (
+                  <label className="xg">Pan {pan === 0 ? 'C' : pan < 0 ? `I${-pan}` : `D${pan}`}
+                    <HSlider label={`Panorama canal ${n}`} value={pan} toPos={(x) => (x + 100) / 200} fromPos={(p) => p * 200 - 100} snap={(x) => Math.round(x / 2) * 2} disabled={!canControl} onChange={(x) => set(`${c}/mix/pan`, 'f', x / 200 + 0.5)} />
+                  </label>
+                );
+              })()}
               <div className="xmeter" title="Medidor enviado por la mesa"><i style={{ width: `${meterDb === undefined ? 0 : Math.max(0, (meterDb + 60) / 60) * 100}%` }} /></div>
             </div>
           );

@@ -17,6 +17,8 @@ test('compases: pulsos y semicorcheas por compás', () => {
   assert.deepEqual([meter('6/8', 60).steps, meter('6/8', 60).beats.length], [12, 2]);
   assert.deepEqual([meter('12/8', 60).steps, meter('12/8', 60).beats.length], [24, 4]);
   assert.deepEqual(meter('7/8', 60).beats, [0, 4, 8]);
+  assert.deepEqual([meter('9/8', 60).steps, meter('9/8', 60).beats.length], [18, 3]);
+  assert.equal(meter('6/4', 60).beats.length, 6);
   assert.ok(Math.abs(meter('4/4', 120).bar - 2) < 1e-9, '4/4 a 120 BPM dura 2 s');
   assert.ok(Math.abs(meter('6/8', 60).bar - 2) < 1e-9, '6/8 a 60 (negra con puntillo) dura 2 s');
 });

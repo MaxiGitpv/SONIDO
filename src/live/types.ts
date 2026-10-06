@@ -103,8 +103,8 @@ export interface Section {
   bars: number;
 }
 export type EndAction = 'stop' | 'loop' | 'next';
-export type TimeSig = '2/4' | '3/4' | '4/4' | '5/4' | '6/8' | '7/8' | '12/8';
-export const TIME_SIGS: TimeSig[] = ['2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '12/8'];
+export type TimeSig = '2/4' | '3/4' | '4/4' | '5/4' | '6/4' | '6/8' | '7/8' | '9/8' | '12/8';
+export const TIME_SIGS: TimeSig[] = ['2/4', '3/4', '4/4', '5/4', '6/4', '6/8', '7/8', '9/8', '12/8'];
 
 export type Style = 'worship' | 'balada' | 'jubilo' | 'funk' | 'salsa' | 'tumbao' | 'merengue' | 'samba';
 export const STYLES: { id: Style; label: string }[] = [

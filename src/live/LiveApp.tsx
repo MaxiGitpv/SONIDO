@@ -68,6 +68,9 @@ const stemCatFromName = (n: string): StemCat => {
 };
 const viewOfRole = (r: Role): View => (r === 'director' ? 'director' : r === 'all' ? 'all' : 'mixer');
 
+declare const __BUILD__: string;
+const BUILD = typeof __BUILD__ === 'string' ? __BUILD__ : 'desarrollo';
+
 export function LiveApp({ onLegacy }: { onLegacy: (m: 'consola' | 'performance') => void }) {
   const [profile, setProfile] = useState(activeProfile);
   return <Workspace key={profile} profile={profile} onProfile={setProfile} onLegacy={onLegacy} />;
@@ -640,6 +643,7 @@ function Workspace({ profile, onProfile, onLegacy }: { profile: string; onProfil
           <span><small>Audio</small> {remote ? 'en el equipo anfitrión' : audioOn && sr ? `${+(sr / 1000).toFixed(1)} kHz${lat ? ` · ${lat} muestras` : ''} · ${engine.outputInfo().channels} canales de salida` : 'en espera (toque para activar)'}</span>
           <span title="Los instrumentos son síntesis propia; micrófonos, archivos y MIDI son reales"><small>Instrumentos</small> síntesis</span>
           <span className={`st-net ${netState.status}`}><small>Red</small> {netState.status === 'on' ? (netState.host ? `anfitrión · ${Math.max(0, netState.peers.length - 1)} conectados` : 'cliente') : netState.status === 'connecting' ? 'conectando…' : 'local'}{netState.mixer ? ` · mesa ${netState.mixer.model}` : ''}</span>
+          <span className="st-build" title="Commit fuente y fecha de compilación"><small>Versión</small> {BUILD}</span>
         </div>
 
         <div className={`lbody tab-${s.tab}`}>

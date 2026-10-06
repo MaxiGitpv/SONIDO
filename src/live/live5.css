@@ -160,3 +160,16 @@ h4.sub { margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; letter-
   .send-row { grid-template-columns: 120px minmax(0, 1fr) 46px auto; }
   .stem-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
+
+/* Teléfono: encabezado y pie se acomodan en varias líneas, sin desplazamiento horizontal de la página. */
+@media (max-width: 600px) {
+  .live { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .narrow .lbody, .narrow .lbody.tab-live { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .lhead { flex-wrap: wrap; row-gap: 6px; height: auto; }
+  .lhead .brand { flex: 1 1 auto; }
+  .lhead .viewsel { order: 5; flex: 1 1 100%; }
+  .lhead .ltabs { order: 6; flex: 1 1 100%; width: 100%; min-width: 0; overflow-x: auto; }
+  .lfoot { flex-wrap: wrap; height: auto; row-gap: 6px; }
+  .lfoot .fnav { min-width: 0; flex: 1 1 40%; }
+  .lfoot .fbtn { flex: 1 1 auto; }
+}

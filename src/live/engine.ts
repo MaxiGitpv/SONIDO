@@ -96,7 +96,7 @@ export function meter(ts: TimeSig, bpm: number) {
   const [num, den] = ts.split('/').map(Number);
   const compound = den === 8 && num % 3 === 0;
   const steps = den === 4 ? num * 4 : num * 2;
-  // En 6/8 y 12/8 el BPM es la negra con puntillo; en los demás, la negra.
+  // En 6/8, 9/8 y 12/8 el BPM es la negra con puntillo; en los demás, la negra.
   const step = compound ? 60 / bpm / 6 : 60 / bpm / 4;
   let beats: number[];
   if (den === 4) beats = Array.from({ length: num }, (_, i) => i * 4);
