@@ -20,6 +20,7 @@ const html = `<title>SONIDO</title>
 <script>${js.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>
 `;
 writeFileSync('dist.html', html);
+writeFileSync('index.html', `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}</body></html>`);
 writeFileSync('preview.html', `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}</body></html>`);
 writeFileSync('preview-demo.html', `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}<script>setTimeout(()=>document.querySelector('.demo').click(),200)</script></body></html>`);
 writeFileSync('preview-mon.html', `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}<script>setTimeout(()=>{document.querySelector('.demo').click();document.querySelectorAll('.mixbtn')[2].click()},200)</script></body></html>`);

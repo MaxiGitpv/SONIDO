@@ -191,8 +191,11 @@ const MASK_LABEL: Record<keyof RecallMask, string> = { faders: 'Faders', mutes: 
 export function MixScenesPage() {
   const { s, d, can } = useLive();
   const [name, setName] = useState('');
+  const [full, setFull] = useState(false);
+  const [confirm, setConfirm] = useState<string | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const edit = can('mixscenes');
+  const areas = (Object.keys(MASK_LABEL) as (keyof RecallMask)[]).filter((k) => s.recallMask[k]).map((k) => MASK_LABEL[k].toLowerCase());
   const current = useMemo(() => JSON.stringify(mixDataOf(s)), [s.console, s.buses, s.master, s.masterMute, s.fx, s.inputs]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = s.mixScenes.find((m) => m.id === s.activeMix);
   const changed = !!active && JSON.stringify(active.data) !== current;
@@ -202,19 +205,26 @@ export function MixScenesPage() {
       <div className="mixsc-layout">
         <section className="lpanel">
           <header className="ph"><Icon name="save" /><h3>Biblioteca</h3>{active && <span className={`badge${changed ? ' warn' : ''}`}>{changed ? `«${active.name}» con cambios` : `«${active.name}» cargada`}</span>}</header>
-          <form className="gp-row" onSubmit={(e) => { e.preventDefault(); d({ type: 'mixSave', name }); setName(''); }}>
+          <form className="gp-row" onSubmit={(e) => { e.preventDefault(); d({ type: 'mixSave', name, full }); setName(''); }}>
             <input id="mix-new" aria-label="Nombre de la nueva escena de mezcla" placeholder="Ej.: Domingo con banda completa" value={name} maxLength={32} disabled={!edit} onChange={(e) => setName(e.target.value)} />
             <button className="mini on" type="submit" disabled={!edit}>Guardar como nueva</button>
           </form>
+          <label className="chk"><input type="checkbox" checked={full} disabled={!edit} onChange={(e) => setFull(e.target.checked)} /> Escena completa: recordar también la canción y la sección actuales</label>
           {s.trash && <button className="mini" onClick={() => d({ type: 'mixUndo' })}>Deshacer eliminación de «{s.trash.name}»</button>}
           <div className="mixlist">
             {s.mixScenes.length === 0 && <p className="hint2">Todavía no hay escenas de mezcla. Ajuste la consola y guárdela con un nombre.</p>}
             {s.mixScenes.map((m) => (
               <article key={m.id} className={`mixitem${m.id === s.activeMix ? ' on' : ''}`}>
                 <input aria-label="Nombre" value={m.name} maxLength={32} disabled={!edit} onChange={(e) => d({ type: 'mixRename', id: m.id, name: e.target.value })} />
-                <small>v{m.version} · {new Date(m.savedAt).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small>
+                <small>{m.ref ? 'Completa · ' : 'Mezcla · '}v{m.version} · {new Date(m.savedAt).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{m.ref ? ` · ${s.songs.find((x) => x.id === m.ref!.songId)?.title ?? 'canción no disponible'}` : ''}</small>
+                {confirm === m.id && (
+                  <div className="gp-confirm">
+                    <p>Se aplicará: {areas.join(', ') || 'nada (máscara vacía)'}{m.ref ? `; y se irá a «${s.songs.find((x) => x.id === m.ref!.songId)?.title ?? '?'}»` : ''}. Canales protegidos: {s.protectedCh.length ? s.protectedCh.map((c) => chName(s, c)).join(', ') : 'ninguno'}.</p>
+                    <div className="gp-row"><button className="mini on" onClick={() => { d({ type: 'mixLoad', id: m.id }); setConfirm(null); }}>Aplicar</button><button className="mini" onClick={() => setConfirm(null)}>Cancelar</button></div>
+                  </div>
+                )}
                 <div className="gp-row">
-                  <button className="mini on" disabled={!edit} onClick={() => d({ type: 'mixLoad', id: m.id })}>Recuperar</button>
+                  <button className="mini on" disabled={!edit} onClick={() => (m.ref ? setConfirm(m.id) : d({ type: 'mixLoad', id: m.id }))}>Recuperar</button>
                   <button className={`mini${armed === m.id ? ' warn' : ''}`} disabled={!edit} onClick={() => {
                     if (armed === m.id) {
                       d({ type: 'mixSave', id: m.id });

@@ -239,6 +239,8 @@ export interface MixScene {
   savedAt: string;
   version: number;
   data: MixData;
+  /** Escena completa: también recuerda canción y sección musical. */
+  ref?: { songId: string; sceneId: SceneId };
 }
 export interface RecallMask {
   faders: boolean;

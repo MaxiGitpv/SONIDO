@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.mjs",
+    "typecheck": "tsc -p .",
+    "test": "node scripts/test.mjs && npm --prefix bridge test",
+    "bridge": "node bridge/sonido-bridge.mjs",
+    "emulador": "node bridge/emulator-xair.mjs"
   },
   "keywords": [],
   "author": "",

@@ -61,7 +61,7 @@ export type LAction =
   | { type: 'busRemove'; id: string }
   | { type: 'aux'; ch: ChId; bus: string; patch: Partial<Send> }
   | { type: 'outputs'; patch: Partial<Outputs> }
-  | { type: 'mixSave'; id?: string; name?: string }
+  | { type: 'mixSave'; id?: string; name?: string; full?: boolean }
   | { type: 'mixLoad'; id: string }
   | { type: 'mixRename'; id: string; name: string }
   | { type: 'mixDelete'; id: string }
@@ -284,12 +284,16 @@ export function liveReducer(s: LState, a: LAction): LState {
         return say({ ...s, mixScenes, activeMix: a.id, dirty: true }, 'Escena de mezcla actualizada');
       }
       const id = `x${Date.now().toString(36)}`;
-      const ms: MixScene = { id, name: a.name?.trim() || `Mezcla ${s.mixScenes.length + 1}`, savedAt: now, version: 1, data };
+      const ms: MixScene = { id, name: a.name?.trim() || `Mezcla ${s.mixScenes.length + 1}`, savedAt: now, version: 1, data, ...(a.full ? { ref: { songId: s.songId, sceneId: s.sceneId } } : {}) };
       return say({ ...s, mixScenes: [...s.mixScenes, ms], activeMix: id, dirty: true }, `Escena de mezcla «${ms.name}» creada`);
     }
     case 'mixLoad': {
       const ms = s.mixScenes.find((m) => m.id === a.id);
-      return ms ? say(recall(s, ms), `«${ms.name}» recuperada${s.protectedCh.length ? ` (protegidos: ${s.protectedCh.length})` : ''}`) : s;
+      if (!ms) return s;
+      let out = recall(s, ms);
+      const sg = ms.ref && s.songs.find((x) => x.id === ms.ref!.songId);
+      if (ms.ref && sg && sg.sections.some((x) => x.id === ms.ref!.sceneId)) out = { ...out, songId: ms.ref.songId, sceneId: ms.ref.sceneId };
+      return say(out, `«${ms.name}» recuperada${s.protectedCh.length ? ` (protegidos: ${s.protectedCh.length})` : ''}`);
     }
     case 'mixRename': return { ...s, dirty: true, mixScenes: s.mixScenes.map((m) => (m.id === a.id ? { ...m, name: a.name } : m)) };
     case 'mixDelete': {
